@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DJ & Live Stream App</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <h1>Cheers Campus Radio</h1>
+
+    <!-- Video Camera Streams -->
+    <div class="camera-streams">
+        <video id="cam1" controls></video>
+        <video id="cam2" controls></video>
+        <video id="cam3" controls></video>
+        <video id="cam4" controls></video>
+        <video id="cam5" controls></video>
+    </div>
+
+    <!-- DJ Decks -->
+    <div id="player" class="decks">
+        <div class="deck">
+            <h3>Deck A</h3>
+            <audio id="deckA" controls></audio>
+        </div>
+        <div class="deck">
+            <h3>Deck B</h3>
+            <audio id="deckB" controls></audio>
+        </div>
+    </div>
+
+    <!-- Bottom Section: Playlist & Media Library with File Selection -->
+    <div class="bottom-section">
+        <!-- Media Library -->
+        <div class="media-library" id="media-library">
+            <h3>Media Library</h3>
+            <input type="file" id="mediaUpload" multiple accept="audio/*">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Artist</th>
+                        <th>Length</th>
+                    </tr>
+                </thead>
+                <tbody id="media-library-items">
+                    <!-- Media files will be dynamically added here -->
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Playlist -->
+        <div class="playlist" id="playlist">
+            <h3>Playlist</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Artist</th>
+                        <th>Length</th>
+                    </tr>
+                </thead>
+                <tbody id="playlist-items">
+                    <!-- Songs will be dynamically added here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Streaming & Recording Controls -->
+    <div class="streaming-controls">
+        <button id="start-stream">Start Live Stream</button>
+        <button id="stop-stream">Stop Stream</button>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

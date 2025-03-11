@@ -1,0 +1,167 @@
+/* DJ & Live Streaming App - CSS Design */
+
+/* General Page Styling */
+body {
+    background-color: #121212;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+h1 {
+    text-align: center;
+    margin: 20px 0;
+    font-size: 24px;
+    text-transform: uppercase;
+}
+
+/* Top Navigation Bar */
+.navbar {
+    width: 100%;
+    background: #222;
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #444;
+}
+
+.navbar h2 {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 18px;
+}
+
+.navbar .clock {
+    padding-right: 20px;
+    font-size: 16px;
+    color: #0f0;
+}
+
+/* Decks Styling */
+.decks {
+    display: flex;
+    justify-content: space-around;
+    width: 90%;
+    margin-top: 20px;
+}
+
+.deck {
+    width: 45%;
+    background: #333;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+    border: 2px solid #555;
+}
+
+.deck h3 {
+    margin-bottom: 10px;
+    font-size: 18px;
+    color: #ffcc00;
+}
+
+.audio-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 10px;
+}
+
+/* Mixer Panel */
+.mixer {
+    width: 60%;
+    background: #222;
+    padding: 15px;
+    border-radius: 10px;
+    border: 2px solid #444;
+    text-align: center;
+    margin-top: 20px;
+}
+
+.mixer h3 {
+    font-size: 18px;
+    color: #ff5500;
+}
+
+.faders {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 10px;
+}
+
+.fader {
+    width: 30px;
+    height: 100px;
+    background: #555;
+    border-radius: 5px;
+    position: relative;
+}
+
+/* Bottom Section: Playlist & Media Library */
+.bottom-section {
+    display: flex;
+    justify-content: space-between;
+    width: 90%;
+    margin-top: 20px;
+}
+
+.media-library, .playlist {
+    width: 48%;
+    background: #333;
+    padding: 15px;
+    border-radius: 10px;
+    border: 2px solid #555;
+    text-align: center;
+    height: 300px;
+    overflow-y: auto;
+}
+
+.media-library h3, .playlist h3 {
+    margin-bottom: 10px;
+    font-size: 18px;
+    color: #ffcc00;
+}
+
+.media-library table, .playlist table {
+    width: 100%;
+    border-collapse: collapse;
+    color: #fff;
+}
+
+.media-library th, .playlist th, .media-library td, .playlist td {
+    border: 1px solid #555;
+    padding: 8px;
+    text-align: left;
+}
+
+.media-library th, .playlist th {
+    background: #444;
+}
+
+/* Streaming & Recording */
+.streaming-controls {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+}
+
+button {
+    background: #ff5500;
+    border: none;
+    padding: 10px 15px;
+    color: #fff;
+    font-size: 14px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #ff7700;
+}
