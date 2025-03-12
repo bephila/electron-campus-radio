@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DJ & Live Stream App</title>
     <link rel="stylesheet" href="index.css">
+    <style>
+        .live-video-monitor {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        #liveMonitor {
+            width: 80%; /* Enlarged size */
+            max-width: 900px;
+            height: auto;
+            border: 2px solid black;
+            border-radius: 10px;
+        }
+    </style>
 </head>
 <body>
     <h1>Cheers Campus Radio</h1>
@@ -12,10 +30,22 @@
     <!-- Camera Monitors -->
     <div class="camera-section">
         <div class="camera-streams">
-            <video id="cam1" controls></video>
-            <video id="cam2" controls></video>
-            <video id="cam3" controls></video>
-            <video id="cam4" controls></video>
+            <div class="camera">
+                <video id="cam1" controls></video>
+                <button onclick="goLive('cam1')">Go Live</button>
+            </div>
+            <div class="camera">
+                <video id="cam2" controls></video>
+                <button onclick="goLive('cam2')">Go Live</button>
+            </div>
+            <div class="camera">
+                <video id="cam3" controls></video>
+                <button onclick="goLive('cam3')">Go Live</button>
+            </div>
+            <div class="camera">
+                <video id="cam4" controls></video>
+                <button onclick="goLive('cam4')">Go Live</button>
+            </div>
         </div>
         <div class="live-video-monitor">
             <h3>Live Monitor</h3>
@@ -27,10 +57,10 @@
     <div id="player" class="decks">
         <div class="deck">
             <h3>Deck A (Now Playing)</h3>
-            <button id="fadeButton">Crossfade</button>
             <audio id="deckA" controls autoplay></audio>
             <input type="range" id="volumeA" min="0" max="1" step="0.01" value="1">
         </div>
+                <button id="fadeButton">Crossfade</button>
         <div class="deck">
             <h3>Deck B (Next Song)</h3>
             <audio id="deckB" controls></audio>
@@ -60,7 +90,7 @@
         <!-- Audio Media Library -->
         <div class="media-library" id="audio-library">
             <h3>Import MP3</h3>
-            <input type="file" id="audioUpload" multiple accept="audio/*">
+            <input type="file" id="audioUpload" multiple accept=".mp3" onchange="updateMediaLibrary(this, 'audio-library-items', 'audio')">
             <table>
                 <thead>
                     <tr>
@@ -74,10 +104,10 @@
             </table>
         </div>
         
-        <!-- Video Media Library -->
+        <!-- Video Media Library (Only MP4) -->
         <div class="media-library" id="video-library">
             <h3>Import MP4</h3>
-            <input type="file" id="videoUpload" multiple accept="video/*">
+            <input type="file" id="videoUpload" multiple accept=".mp4" onchange="updateMediaLibrary(this, 'video-library-items', 'video')">
             <table>
                 <thead>
                     <tr>
@@ -99,6 +129,35 @@
         <button id="save-session">Save Session</button>
     </div>
 
+    <script>
+        function goLive(cameraId) {
+            const liveMonitor = document.getElementById("liveMonitor");
+            const selectedCamera = document.getElementById(cameraId);
+            
+            if (selectedCamera.srcObject) {
+                liveMonitor.srcObject = selectedCamera.srcObject;
+            } else {
+                liveMonitor.src = selectedCamera.src;
+            }
+            liveMonitor.play();
+        }
+
+        function updateMediaLibrary(inputElement, targetTableId, mediaType) {
+            const targetTable = document.getElementById(targetTableId);
+            Array.from(inputElement.files).forEach(file => {
+                let row = document.createElement("tr");
+                let titleCell = document.createElement("td");
+                titleCell.textContent = file.name;
+                let lengthCell = document.createElement("td");
+                lengthCell.textContent = "--:--"; // Placeholder for length
+                row.appendChild(titleCell);
+                row.appendChild(lengthCell);
+                targetTable.appendChild(row);
+            });
+        }
+    </script>
+
     <script src="renderer.js"></script>
 </body>
 </html>
+ 

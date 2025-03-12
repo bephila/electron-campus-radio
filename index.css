@@ -39,7 +39,43 @@ h1 {
 
 .camera-streams {
     display: flex;
-    gap: 10px;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.camera {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.camera button {
+    margin-top: 10px;
+    background-color: orange;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+.live-video-monitor {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    margin-top: 20px;
+}
+
+#liveMonitor {
+    width: 80%; /* Enlarged size */
+    max-width: 900px;
+    height: auto;
+    border: 2px solid black;
+    border-radius: 10px;
 }
 
 .navbar .clock {
@@ -169,4 +205,17 @@ button {
 
 button:hover {
     background: #ff7700;
+}
+
+input[type="file"]::file-selector-button {
+    background-color: #ffcc00;
+    color: black;
+    border: none;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+input[type="file"]::file-selector-button::after {
+    content: " Upload";
 }
