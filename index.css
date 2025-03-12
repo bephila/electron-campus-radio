@@ -37,6 +37,11 @@ h1 {
     font-size: 18px;
 }
 
+.camera-streams {
+    display: flex;
+    gap: 10px;
+}
+
 .navbar .clock {
     padding-right: 20px;
     font-size: 16px;

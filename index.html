@@ -9,47 +9,37 @@
 <body>
     <h1>Cheers Campus Radio</h1>
 
-    <!-- Video Camera Streams -->
-    <div class="camera-streams">
-        <video id="cam1" controls></video>
-        <video id="cam2" controls></video>
-        <video id="cam3" controls></video>
-        <video id="cam4" controls></video>
-        <video id="cam5" controls></video>
+    <!-- Camera Monitors -->
+    <div class="camera-section">
+        <div class="camera-streams">
+            <video id="cam1" controls></video>
+            <video id="cam2" controls></video>
+            <video id="cam3" controls></video>
+            <video id="cam4" controls></video>
+        </div>
+        <div class="live-video-monitor">
+            <h3>Live Monitor</h3>
+            <video id="liveMonitor" controls></video>
+        </div>
     </div>
 
     <!-- DJ Decks -->
     <div id="player" class="decks">
         <div class="deck">
-            <h3>Deck A</h3>
-            <audio id="deckA" controls></audio>
+            <h3>Deck A (Now Playing)</h3>
+            <button id="fadeButton">Crossfade</button>
+            <audio id="deckA" controls autoplay></audio>
+            <input type="range" id="volumeA" min="0" max="1" step="0.01" value="1">
         </div>
         <div class="deck">
-            <h3>Deck B</h3>
+            <h3>Deck B (Next Song)</h3>
             <audio id="deckB" controls></audio>
+            <input type="range" id="volumeB" min="0" max="1" step="0.01" value="1">
         </div>
     </div>
 
-    <!-- Bottom Section: Playlist & Media Library with File Selection -->
+    <!-- Bottom Section: Playlist, Audio & Video Import Lists -->
     <div class="bottom-section">
-        <!-- Media Library -->
-        <div class="media-library" id="media-library">
-            <h3>Media Library</h3>
-            <input type="file" id="mediaUpload" multiple accept="audio/*">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Artist</th>
-                        <th>Length</th>
-                    </tr>
-                </thead>
-                <tbody id="media-library-items">
-                    <!-- Media files will be dynamically added here -->
-                </tbody>
-            </table>
-        </div>
-        
         <!-- Playlist -->
         <div class="playlist" id="playlist">
             <h3>Playlist</h3>
@@ -57,12 +47,46 @@
                 <thead>
                     <tr>
                         <th>Title</th>
-                        <th>Artist</th>
+                        <th>Type</th>
                         <th>Length</th>
                     </tr>
                 </thead>
                 <tbody id="playlist-items">
-                    <!-- Songs will be dynamically added here -->
+                    <!-- Songs and videos dynamically added -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Audio Media Library -->
+        <div class="media-library" id="audio-library">
+            <h3>Import MP3</h3>
+            <input type="file" id="audioUpload" multiple accept="audio/*">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Length</th>
+                    </tr>
+                </thead>
+                <tbody id="audio-library-items">
+                    <!-- Audio files dynamically added -->
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Video Media Library -->
+        <div class="media-library" id="video-library">
+            <h3>Import MP4</h3>
+            <input type="file" id="videoUpload" multiple accept="video/*">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Length</th>
+                    </tr>
+                </thead>
+                <tbody id="video-library-items">
+                    <!-- Video files dynamically added -->
                 </tbody>
             </table>
         </div>
@@ -72,6 +96,7 @@
     <div class="streaming-controls">
         <button id="start-stream">Start Live Stream</button>
         <button id="stop-stream">Stop Stream</button>
+        <button id="save-session">Save Session</button>
     </div>
 
     <script src="renderer.js"></script>
