@@ -219,3 +219,27 @@ input[type="file"]::file-selector-button {
 input[type="file"]::file-selector-button::after {
     content: " Upload";
 }
+/* Hide default file input */
+input[type="file"] {
+    display: none;
+}
+
+/* Style the custom upload button */
+.custom-file-upload {
+    background-color: #ffcc00; /* Yellow button */
+    color: black;
+    padding: 10px 20px;
+    font-size: 16px;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    display: inline-block;
+    text-align: center;
+    border: 2px solid black;
+    transition: 0.3s;
+}
+
+/* Add hover effect */
+.custom-file-upload:hover {
+    background-color: #ffdd44;
+}
