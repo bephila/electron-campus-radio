@@ -72,6 +72,12 @@
         <div class="live-video-monitor">
             <h3>Live Monitor</h3>
             <video id="liveMonitor" controls></video>
+                <!-- Streaming & Recording Controls -->
+            <div class="streaming-controls">
+                <button id="start-stream">Start Live Stream</button>
+                <button id="stop-stream">Stop Stream</button>
+                <button id="save-session">Save Session</button>
+            </div>
         </div>
     </div>
     
@@ -103,16 +109,18 @@
                         <th>Length</th>
                     </tr>
                 </thead>
-                <tbody id="playlist-items">
+                <tbody id="playlist-items" ondragover="allowDrop(event)" ondrop="dropItem(event)">
                     <!-- Songs and videos dynamically added -->
                 </tbody>
             </table>
         </div>
-
-        <!-- Audio Media Library -->
+        <!-- Audio Media Library (Only MP3) -->
         <div class="media-library" id="audio-library">
             <h3>Import MP3</h3>
-            <input type="file" id="audioUpload" multiple accept=".mp3" onchange="updateMediaLibrary(this, 'audio-library-items', 'audio')">
+            <label class="custom-file-upload">
+                <input type="file" id="audioUpload" multiple accept=".mp3" onchange="updateMediaLibrary(this, 'audio-library-items', 'audio')">
+                Upload MP3
+            </label>
             <table>
                 <thead>
                     <tr>
@@ -125,11 +133,14 @@
                 </tbody>
             </table>
         </div>
-        
+
         <!-- Video Media Library (Only MP4) -->
         <div class="media-library" id="video-library">
             <h3>Import MP4</h3>
-            <input type="file" id="videoUpload" multiple accept=".mp4" onchange="updateMediaLibrary(this, 'video-library-items', 'video')">
+            <label class="custom-file-upload">
+                <input type="file" id="videoUpload" multiple accept=".mp4" onchange="updateMediaLibrary(this, 'video-library-items', 'video')">
+                Upload MP4
+            </label>
             <table>
                 <thead>
                     <tr>
@@ -142,6 +153,7 @@
                 </tbody>
             </table>
         </div>
+<<<<<<< HEAD
     </div>
 
     <!-- Streaming & Recording Controls -->
@@ -152,7 +164,118 @@
     </div>
 
     
+=======
+    <script>
+        function updateMediaLibrary(inputElement, targetTableId, mediaType) {
+            const targetTable = document.getElementById(targetTableId);
 
+            Array.from(inputElement.files).forEach(file => {
+                if (!file) return;
+
+                let row = document.createElement("tr");
+                row.draggable = true;  // Enable dragging
+                row.addEventListener("dragstart", dragItem);
+
+                let titleCell = document.createElement("td");
+                titleCell.textContent = file.name;
+
+                let lengthCell = document.createElement("td");
+                lengthCell.textContent = "Loading..."; // Placeholder for duration
+
+                row.appendChild(titleCell);
+                row.appendChild(lengthCell);
+                targetTable.appendChild(row);
+
+                // Store file information for dragging
+                row.dataset.fileName = file.name;
+                row.dataset.fileType = mediaType;
+                row.dataset.fileUrl = URL.createObjectURL(file);
+
+                // Extract duration
+                if (mediaType === "audio") {
+                    getAudioDuration(file, lengthCell, row);
+                } else if (mediaType === "video") {
+                    getVideoDuration(file, lengthCell, row);
+                }
+            });
+        }
+>>>>>>> 6e8550e08b26a05aa6023bfea83651e7a9f4cb0e
+
+        function getAudioDuration(file, lengthCell, row) {
+            const audio = new Audio();
+            audio.src = URL.createObjectURL(file);
+            audio.addEventListener("loadedmetadata", function () {
+                let duration = formatTime(audio.duration);
+                lengthCell.textContent = duration;
+                row.dataset.fileDuration = duration;
+                URL.revokeObjectURL(audio.src);
+            });
+        }
+
+        function getVideoDuration(file, lengthCell, row) {
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.src = URL.createObjectURL(file);
+            video.addEventListener("loadedmetadata", function () {
+                let duration = formatTime(video.duration);
+                lengthCell.textContent = duration;
+                row.dataset.fileDuration = duration;
+                URL.revokeObjectURL(video.src);
+            });
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, "0")}`;
+        }
+
+        // Drag-and-Drop Functions
+        function dragItem(event) {
+            console.log("Dragging item...");  // Debugging log
+            event.dataTransfer.setData("text/plain", JSON.stringify(event.target.dataset));
+        }
+
+        function allowDrop(event) {
+            event.preventDefault(); // Allow dropping
+        }
+
+        function dropItem(event) {
+            event.preventDefault();
+            const data = JSON.parse(event.dataTransfer.getData("text/plain"));
+
+            let row = document.createElement("tr");
+            let titleCell = document.createElement("td");
+            titleCell.textContent = data.fileName;
+
+            let typeCell = document.createElement("td");
+            typeCell.textContent = data.fileType;
+
+            let lengthCell = document.createElement("td");
+            lengthCell.textContent = data.fileDuration || "--:--";
+
+            row.appendChild(titleCell);
+            row.appendChild(typeCell);
+            row.appendChild(lengthCell);
+
+            document.getElementById("playlist-items").appendChild(row);
+
+            // Play the media on drop
+            playMedia(data.fileUrl, data.fileType);
+        }
+
+        function playMedia(url, type) {
+            if (type === "audio") {
+                let deckA = document.getElementById("deckA");
+                deckA.src = url;
+                deckA.play();
+            } else if (type === "video") {
+                let monitor = document.getElementById("liveMonitor");
+                monitor.src = url;
+                monitor.play();
+            }
+        }
+    </script>
     <script src="renderer.js"></script>
     <script src="live-video.js"></script>
     <script> src="get-video-device.js"</script>
