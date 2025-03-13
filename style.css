@@ -37,6 +37,19 @@ h1 {
     font-size: 18px;
 }
 
+.camera-section {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.camera-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+}
+
 .camera-streams {
     display: flex;
     justify-content: center;
@@ -46,9 +59,8 @@ h1 {
 
 .camera {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    text-align: center;
+    gap: 10px;
 }
 
 .camera button {
@@ -61,6 +73,33 @@ h1 {
     border-radius: 5px;
 }
 
+.controls {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.icon-button {
+    background: orange;
+    border: none;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.icon-button img {
+    width: 24px;
+    height: 24px;
+}
+
+video {
+    width: 320px; /* Fixed size */
+    height: 180px; /* Fixed size */
+    object-fit: cover;
+}
+
 .live-video-monitor {
     display: flex;
     flex-direction: column;
@@ -70,12 +109,32 @@ h1 {
     margin-top: 20px;
 }
 
+.live-video-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
 #liveMonitor {
-    width: 80%; /* Enlarged size */
+    width: 80%;
     max-width: 900px;
     height: auto;
     border: 2px solid black;
     border-radius: 10px;
+}
+
+.settings-icon {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.camera-settings {
+    display: none;
+    position: absolute;
+    background: white;
+    border: 1px solid black;
+    padding: 10px;
 }
 
 .navbar .clock {

@@ -4,55 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DJ & Live Stream App</title>
-    <link rel="stylesheet" href="index.css">
-    <style>
-        .live-video-monitor {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            margin-top: 20px;
-        }
-
-        #liveMonitor {
-            width: 80%; /* Enlarged size */
-            max-width: 900px;
-            height: auto;
-            border: 2px solid black;
-            border-radius: 10px;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/boxicons@2.1.4/dist/boxicons.js"></script>
 </head>
 <body>
     <h1>Cheers Campus Radio</h1>
-
-    <!-- Camera Monitors -->
+    
+         <!-- Camera Monitors -->
     <div class="camera-section">
-        <div class="camera-streams">
-            <div class="camera">
-                <video id="cam1" controls></video>
-                <button onclick="goLive('cam1')">Go Live</button>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam1')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam1')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button" onclick="showSettings('settings1')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
             </div>
-            <div class="camera">
-                <video id="cam2" controls></video>
-                <button onclick="goLive('cam2')">Go Live</button>
-            </div>
-            <div class="camera">
-                <video id="cam3" controls></video>
-                <button onclick="goLive('cam3')">Go Live</button>
-            </div>
-            <div class="camera">
-                <video id="cam4" controls></video>
-                <button onclick="goLive('cam4')">Go Live</button>
-            </div>
+            <video id="cam1" controls></video>
         </div>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam2')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam2')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button" onclick="showSettings('settings2')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam2" controls></video>
+        </div>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam3')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam3')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button" onclick="showSettings('settings3')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam3" controls></video>
+        </div>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam4')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam4')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button" onclick="showSettings('settings4')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam4" controls></video>
+        </div>
+    </div>
         <div class="live-video-monitor">
             <h3>Live Monitor</h3>
             <video id="liveMonitor" controls></video>
         </div>
     </div>
-
+    
     <!-- DJ Decks -->
     <div id="player" class="decks">
         <div class="deck">
@@ -129,35 +151,11 @@
         <button id="save-session">Save Session</button>
     </div>
 
-    <script>
-        function goLive(cameraId) {
-            const liveMonitor = document.getElementById("liveMonitor");
-            const selectedCamera = document.getElementById(cameraId);
-            
-            if (selectedCamera.srcObject) {
-                liveMonitor.srcObject = selectedCamera.srcObject;
-            } else {
-                liveMonitor.src = selectedCamera.src;
-            }
-            liveMonitor.play();
-        }
-
-        function updateMediaLibrary(inputElement, targetTableId, mediaType) {
-            const targetTable = document.getElementById(targetTableId);
-            Array.from(inputElement.files).forEach(file => {
-                let row = document.createElement("tr");
-                let titleCell = document.createElement("td");
-                titleCell.textContent = file.name;
-                let lengthCell = document.createElement("td");
-                lengthCell.textContent = "--:--"; // Placeholder for length
-                row.appendChild(titleCell);
-                row.appendChild(lengthCell);
-                targetTable.appendChild(row);
-            });
-        }
-    </script>
+    
 
     <script src="renderer.js"></script>
+    <script src="live-video.js"></script>
+    <script> src="get-video-device.js"</script>
 </body>
 </html>
  
