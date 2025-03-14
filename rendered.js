@@ -1,90 +1,111 @@
+const { ipcRenderer } = require("electron");
+
 document.addEventListener("DOMContentLoaded", () => {
-    const deckA = document.getElementById("deckA");
-    const deckB = document.getElementById("deckB");
-    const audioUpload = document.getElementById("audioUpload");
-    const videoUpload = document.getElementById("videoUpload");
-    const audioLibrary = document.getElementById("audio-library-items");
-    const videoLibrary = document.getElementById("video-library-items");
-    const playlist = document.getElementById("playlist-items");
-    
-    // Audio Library Upload Functionality
-    audioUpload.addEventListener("change", (event) => {
-        Array.from(event.target.files).forEach(file => {
-            let row = document.createElement("tr");
-            row.draggable = true;
-            row.ondragstart = (ev) => {
-                ev.dataTransfer.setData("text", JSON.stringify({ type: 'audio', name: file.name }));
-            };
-            
-            let titleCell = document.createElement("td");
-            titleCell.textContent = file.name;
-            let artistCell = document.createElement("td");
-            artistCell.textContent = "Unknown";
-            let lengthCell = document.createElement("td");
-            lengthCell.textContent = "--:--";
-            
-            row.appendChild(titleCell);
-            row.appendChild(artistCell);
-            row.appendChild(lengthCell);
-            
-            audioLibrary.appendChild(row);
-        });
+    const liveMonitor = document.getElementById("liveMonitor");
+    const liveStatus = document.getElementById("live-status");
+    let mediaStreams = {}; // Store active camera streams
+    let activeCameraId = null;
+    let isStreaming = false;
+    let rtmpUrl = "rtmp://localhost/live/stream";
+
+    function updateLiveStatus(status) {
+        if (status) {
+            liveStatus.textContent = "Live";
+            liveStatus.classList.remove("live-off");
+            liveStatus.classList.add("live-on");
+        } else {
+            liveStatus.textContent = "Offline";
+            liveStatus.classList.remove("live-on");
+            liveStatus.classList.add("live-off");
+        }
+    }
+
+    // **Check if any camera is currently playing**
+    function getActiveCamera() {
+        for (const camId of Object.keys(mediaStreams)) {
+            const videoElement = document.getElementById(camId);
+            if (mediaStreams[camId] && videoElement.srcObject && !videoElement.paused) {
+                console.log(`Detected active camera: ${camId}`);
+                return camId;
+            }
+        }
+        return null;
+    }
+
+    // **Start a Specific Camera**
+    async function goLive(cameraId) {
+        try {
+            console.log(`Attempting to start camera: ${cameraId}`);
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: true, // Gets the first available camera
+                audio: false
+            });
+
+            const videoElement = document.getElementById(cameraId);
+            videoElement.srcObject = stream;
+            videoElement.play();
+            mediaStreams[cameraId] = stream;
+            activeCameraId = cameraId;
+
+            console.log(`Camera ${cameraId} is now live.`);
+        } catch (error) {
+            console.error(`Error accessing camera ${cameraId}:`, error);
+        }
+    }
+
+    // **Stop a Specific Camera**
+    function stopLive(cameraId) {
+        if (mediaStreams[cameraId]) {
+            mediaStreams[cameraId].getTracks().forEach(track => track.stop());
+            document.getElementById(cameraId).srcObject = null;
+            delete mediaStreams[cameraId];
+            if (activeCameraId === cameraId) activeCameraId = null;
+            console.log(`Camera ${cameraId} stopped.`);
+        }
+    }
+
+    // **Start Streaming Using an Active Camera**
+    document.getElementById("start-stream").addEventListener("click", async () => {
+        if (isStreaming) {
+            console.warn("Streaming is already active.");
+            return;
+        }
+
+        activeCameraId = getActiveCamera();
+
+        if (!activeCameraId) {
+            alert("No camera is active. Please start a camera before streaming.");
+            return;
+        }
+
+        try {
+            console.log(`Starting stream from camera: ${activeCameraId}`);
+
+            const stream = document.getElementById(activeCameraId).srcObject;
+            liveMonitor.srcObject = stream;
+            liveMonitor.play();
+            isStreaming = true;
+
+            updateLiveStatus(true);
+            ipcRenderer.send("start-ffmpeg", rtmpUrl, activeCameraId);
+        } catch (error) {
+            console.error("Error starting stream:", error);
+        }
     });
-  
-    // Video Library Upload Functionality
-    videoUpload.addEventListener("change", (event) => {
-        Array.from(event.target.files).forEach(file => {
-            let row = document.createElement("tr");
-            row.draggable = true;
-            row.ondragstart = (ev) => {
-                ev.dataTransfer.setData("text", JSON.stringify({ type: 'video', name: file.name }));
-            };
-            
-            let titleCell = document.createElement("td");
-            titleCell.textContent = file.name;
-            let lengthCell = document.createElement("td");
-            lengthCell.textContent = "--:--";
-            
-            row.appendChild(titleCell);
-            row.appendChild(lengthCell);
-            
-            videoLibrary.appendChild(row);
-        });
-    });
-  
-    // Playlist Drag and Drop Functionality
-    playlist.addEventListener("dragover", (event) => {
-        event.preventDefault();
-    });
-  
-    playlist.addEventListener("drop", (event) => {
-        event.preventDefault();
-        let data = JSON.parse(event.dataTransfer.getData("text"));
-        let newRow = document.createElement("tr");
-        
-        let titleCell = document.createElement("td");
-        titleCell.textContent = data.name;
-        let typeCell = document.createElement("td");
-        typeCell.textContent = data.type;
-        let lengthCell = document.createElement("td");
-        lengthCell.textContent = "--:--";
-        
-        newRow.appendChild(titleCell);
-        newRow.appendChild(typeCell);
-        newRow.appendChild(lengthCell);
-        
-        playlist.appendChild(newRow);
-    });
-  
-    // Streaming Controls
-    document.getElementById("start-stream").addEventListener("click", () => {
-        console.log("Live Stream Started");
-        // Implement start streaming logic
-    });
-  
+
+    // **Stop Streaming**
     document.getElementById("stop-stream").addEventListener("click", () => {
-        console.log("Live Stream Stopped");
-        // Implement stop streaming logic
+        if (!isStreaming) return;
+
+        ipcRenderer.send("stop-ffmpeg");
+        isStreaming = false;
+        updateLiveStatus(false);
+        console.log("Streaming stopped.");
     });
-  });
-  
+
+    // **Handle Live Status Updates from Main Process**
+    ipcRenderer.on("stream-status", (event, status) => {
+        updateLiveStatus(status);
+    });
+});

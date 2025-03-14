@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DJ & Live Stream App</title>
+    <title>Cheers</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/boxicons@2.1.4/dist/boxicons.js"></script>
 </head>
@@ -20,7 +20,7 @@
                 <button class="icon-button" onclick="stopLive('cam1')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button" onclick="showSettings('settings1')">
+                <button class="icon-button settings-button" onclick="showSettings('settings1', 'cam1', event)">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -34,7 +34,7 @@
                 <button class="icon-button" onclick="stopLive('cam2')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button" onclick="showSettings('settings2')">
+                <button class="icon-button settings-button" onclick="showSettings('settings2', 'cam2', event)">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -48,7 +48,7 @@
                 <button class="icon-button" onclick="stopLive('cam3')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button" onclick="showSettings('settings3')">
+                <button class="icon-button settings-button" onclick="showSettings('settings3', 'cam3', event)">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -57,21 +57,25 @@
         <div class="camera">
             <div class="controls">
                 <button class="icon-button" onclick="goLive('cam4')">
-                    <img src="icons/bx-play.svg" alt="Play">
+                    <img src="icons/bx-play.svg" alt="aPlay">
                 </button>
                 <button class="icon-button" onclick="stopLive('cam4')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button" onclick="showSettings('settings4')">
+                <button class="icon-button settings-button" onclick="showSettings('settings4', 'cam4', event)">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
             <video id="cam4" controls></video>
         </div>
     </div>
+
+    <!-- Live Monitor -->
         <div class="live-video-monitor">
             <h3>Live Monitor</h3>
-            <video id="liveMonitor" controls></video>
+            <video id="liveMonitor" controls autoplay playsinline></video>
+
+            <div id="live-status" class="live-off"> Offline </div>
                 <!-- Streaming & Recording Controls -->
             <div class="streaming-controls">
                 <button id="start-stream">Start Live Stream</button>
@@ -153,7 +157,6 @@
                 </tbody>
             </table>
         </div>
-<<<<<<< HEAD
     </div>
 
     <!-- Streaming & Recording Controls -->
@@ -164,7 +167,7 @@
     </div>
 
     
-=======
+
     <script>
         function updateMediaLibrary(inputElement, targetTableId, mediaType) {
             const targetTable = document.getElementById(targetTableId);
@@ -199,7 +202,6 @@
                 }
             });
         }
->>>>>>> 6e8550e08b26a05aa6023bfea83651e7a9f4cb0e
 
         function getAudioDuration(file, lengthCell, row) {
             const audio = new Audio();
@@ -276,9 +278,9 @@
             }
         }
     </script>
-    <script src="renderer.js"></script>
+    <script src="rendered.js"></script>
     <script src="live-video.js"></script>
-    <script> src="get-video-device.js"</script>
+    <script src="get-video-devices.js"></script>
 </body>
 </html>
  
