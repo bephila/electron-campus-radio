@@ -41,6 +41,7 @@ h1 {
     display: flex;
     justify-content: center;
     align-items: flex-start;
+    flex-wrap: wrap;
     gap: 20px;
 }
 
@@ -76,7 +77,6 @@ h1 {
 .controls {
     display: flex;
     flex-direction: column;
-    gap: 5px;
 }
 
 .icon-button {
@@ -209,6 +209,7 @@ video {
     justify-content: space-between;
     width: 90%;
     margin-top: 20px;
+    margin-bottom: 25px;
 }
 
 .media-library, .playlist {
@@ -218,7 +219,7 @@ video {
     border-radius: 10px;
     border: 2px solid #555;
     text-align: center;
-    height: 300px;
+    height: 500px;
     overflow-y: auto;
 }
 
@@ -296,6 +297,7 @@ input[type="file"] {
     text-align: center;
     border: 2px solid black;
     transition: 0.3s;
+    margin-bottom: 15px;
 }
 
 /* Add hover effect */
