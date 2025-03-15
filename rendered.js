@@ -1,12 +1,7 @@
-const { ipcRenderer } = require("electron");
-
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
     const liveMonitor = document.getElementById("liveMonitor");
     const liveStatus = document.getElementById("live-status");
-    let mediaStreams = {}; // Store active camera streams
     let activeCameraId = null;
-    let isStreaming = false;
-    let rtmpUrl = "rtmp://localhost/live/stream";
 
     function updateLiveStatus(status) {
         if (status) {
@@ -20,92 +15,104 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // **Check if any camera is currently playing**
-    function getActiveCamera() {
-        for (const camId of Object.keys(mediaStreams)) {
-            const videoElement = document.getElementById(camId);
-            if (mediaStreams[camId] && videoElement.srcObject && !videoElement.paused) {
-                console.log(`Detected active camera: ${camId}`);
-                return camId;
-            }
-        }
-        return null;
+    async function getVideoDevices() {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.filter(device => device.kind === "videoinput");
     }
 
-    // **Start a Specific Camera**
     async function goLive(cameraId) {
+        const videoElement = document.getElementById(cameraId);
+        const liveMonitor = document.getElementById("liveMonitor");
+
         try {
-            console.log(`Attempting to start camera: ${cameraId}`);
+            let deviceId = videoElement.dataset.deviceId;
+
+            if (!deviceId) {
+                console.warn(`No device assigned for ${cameraId}. Selecting default.`);
+                const devices = await getVideoDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                if (videoDevices.length > 0) {
+                    deviceId = videoDevices[0].deviceId;
+                    videoElement.dataset.deviceId = deviceId;
+                }
+            }
 
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: true, // Gets the first available camera
-                audio: false
+                video: { deviceId: deviceId ? { exact: deviceId } : undefined }
             });
 
-            const videoElement = document.getElementById(cameraId);
             videoElement.srcObject = stream;
             videoElement.play();
-            mediaStreams[cameraId] = stream;
+            videoElement.dataset.ready = "true";
+
             activeCameraId = cameraId;
-
-            console.log(`Camera ${cameraId} is now live.`);
-        } catch (error) {
-            console.error(`Error accessing camera ${cameraId}:`, error);
-        }
-    }
-
-    // **Stop a Specific Camera**
-    function stopLive(cameraId) {
-        if (mediaStreams[cameraId]) {
-            mediaStreams[cameraId].getTracks().forEach(track => track.stop());
-            document.getElementById(cameraId).srcObject = null;
-            delete mediaStreams[cameraId];
-            if (activeCameraId === cameraId) activeCameraId = null;
-            console.log(`Camera ${cameraId} stopped.`);
-        }
-    }
-
-    // **Start Streaming Using an Active Camera**
-    document.getElementById("start-stream").addEventListener("click", async () => {
-        if (isStreaming) {
-            console.warn("Streaming is already active.");
-            return;
-        }
-
-        activeCameraId = getActiveCamera();
-
-        if (!activeCameraId) {
-            alert("No camera is active. Please start a camera before streaming.");
-            return;
-        }
-
-        try {
-            console.log(`Starting stream from camera: ${activeCameraId}`);
-
-            const stream = document.getElementById(activeCameraId).srcObject;
             liveMonitor.srcObject = stream;
             liveMonitor.play();
-            isStreaming = true;
 
-            updateLiveStatus(true);
-            ipcRenderer.send("start-ffmpeg", rtmpUrl, activeCameraId);
+            console.log(`✅ Camera ${cameraId} is now live.`);
         } catch (error) {
-            console.error("Error starting stream:", error);
+            console.error("Error accessing camera:", error);
+        }
+    }
+
+    function stopLive(cameraId) {
+        const videoElement = document.getElementById(cameraId);
+        if (videoElement.srcObject) {
+            videoElement.srcObject.getTracks().forEach(track => track.stop());
+            videoElement.srcObject = null;
+        }
+    }
+
+    document.getElementById("start-stream").addEventListener("click", async () => {
+        if (!activeCameraId) {
+            alert("No camera is active. Please select a camera before streaming.");
+            return;
+        }
+
+        console.log(`🚀 Starting stream from camera: ${activeCameraId}`);
+        window.electronAPI.startFFmpeg(activeCameraId);
+
+        let streamUrl = `http://localhost:8080/hls/${activeCameraId}/index.m3u8`;
+        console.log(`Setting live monitor source to: ${streamUrl}`);
+
+        let liveMonitor = document.getElementById("liveMonitor");
+        liveMonitor.pause();
+        liveMonitor.src = streamUrl;
+        liveMonitor.load();
+        liveMonitor.play();
+
+        updateLiveStatus(true);
+    });
+
+    document.getElementById("stop-stream").addEventListener("click", () => {
+        if (!activeCameraId) {
+            alert("No active stream to stop.");
+            return;
+        }
+
+        console.log(`🛑 Stopping stream for: ${activeCameraId}`);
+        window.electronAPI.stopFFmpeg(activeCameraId);
+        stopLive(activeCameraId);
+
+        let liveMonitor = document.getElementById("liveMonitor");
+        liveMonitor.src = "";
+        liveMonitor.pause();
+
+        updateLiveStatus(false);
+    });
+
+    window.electronAPI.onStreamStatus(({ cameraId, status }) => {
+        if (!status) {
+            liveMonitor.src = "";
+            liveMonitor.pause();
+            updateLiveStatus(false);
         }
     });
 
-    // **Stop Streaming**
-    document.getElementById("stop-stream").addEventListener("click", () => {
-        if (!isStreaming) return;
-
-        ipcRenderer.send("stop-ffmpeg");
-        isStreaming = false;
-        updateLiveStatus(false);
-        console.log("Streaming stopped.");
-    });
-
-    // **Handle Live Status Updates from Main Process**
-    ipcRenderer.on("stream-status", (event, status) => {
-        updateLiveStatus(status);
-    });
+    const devices = await getVideoDevices();
+    if (devices.length > 0) {
+        console.log("Available cameras:", devices);
+    } else {
+        console.warn("No cameras detected.");
+    }
 });
