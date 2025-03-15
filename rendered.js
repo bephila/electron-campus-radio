@@ -36,23 +36,24 @@ document.addEventListener("DOMContentLoaded", () => {
     async function goLive(cameraId) {
         try {
             console.log(`Attempting to start camera: ${cameraId}`);
-
+    
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: true, // Gets the first available camera
+                video: true, 
                 audio: false
             });
-
+    
             const videoElement = document.getElementById(cameraId);
             videoElement.srcObject = stream;
             videoElement.play();
             mediaStreams[cameraId] = stream;
             activeCameraId = cameraId;
-
+    
             console.log(`Camera ${cameraId} is now live.`);
         } catch (error) {
+            alert("Unable to access the camera. Please check permissions.");
             console.error(`Error accessing camera ${cameraId}:`, error);
         }
-    }
+    }    
 
     // **Stop a Specific Camera**
     function stopLive(cameraId) {
@@ -108,4 +109,26 @@ document.addEventListener("DOMContentLoaded", () => {
     ipcRenderer.on("stream-status", (event, status) => {
         updateLiveStatus(status);
     });
+    
+    document.getElementById("fadeButton").addEventListener("click", function () {
+        let deckA = document.getElementById("deckA");
+        let deckB = document.getElementById("deckB");
+        let fadeTime = 3000; // 3 seconds fade duration
+    
+        let startVolumeA = deckA.volume;
+        let startVolumeB = deckB.volume;
+    
+        let fadeOut = setInterval(() => {
+            if (deckA.volume > 0) {
+                deckA.volume = Math.max(0, deckA.volume - 0.05);
+            }
+            if (deckB.volume < startVolumeB) {
+                deckB.volume = Math.min(startVolumeB, deckB.volume + 0.05);
+            }
+            if (deckA.volume <= 0) {
+                clearInterval(fadeOut);
+                deckA.pause();
+            }
+        }, fadeTime / 20);
+    });    
 });
