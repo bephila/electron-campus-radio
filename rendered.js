@@ -21,39 +21,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     async function goLive(cameraId) {
-        const videoElement = document.getElementById(cameraId);
-        const liveMonitor = document.getElementById("liveMonitor");
-
         try {
-            let deviceId = videoElement.dataset.deviceId;
-
-            if (!deviceId) {
-                console.warn(`No device assigned for ${cameraId}. Selecting default.`);
-                const devices = await getVideoDevices();
-                const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                if (videoDevices.length > 0) {
-                    deviceId = videoDevices[0].deviceId;
-                    videoElement.dataset.deviceId = deviceId;
-                }
-            }
+            console.log(`Attempting to start camera: ${cameraId}`);
 
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: deviceId ? { exact: deviceId } : undefined }
+                video: true, // Gets the first available camera
+                audio: false
             });
 
+            const videoElement = document.getElementById(cameraId);
             videoElement.srcObject = stream;
             videoElement.play();
             videoElement.dataset.ready = "true";
 
             activeCameraId = cameraId;
-            liveMonitor.srcObject = stream;
-            liveMonitor.play();
 
-            console.log(`✅ Camera ${cameraId} is now live.`);
+            console.log(`Camera ${cameraId} is now live.`);
         } catch (error) {
-            console.error("Error accessing camera:", error);
+            console.error(`Error accessing camera ${cameraId}:`, error);
         }
-    }
+    }    
 
     function stopLive(cameraId) {
         const videoElement = document.getElementById(cameraId);
@@ -99,20 +86,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         liveMonitor.pause();
 
         updateLiveStatus(false);
+        console.log("Streaming stopped.");
     });
 
-    window.electronAPI.onStreamStatus(({ cameraId, status }) => {
-        if (!status) {
-            liveMonitor.src = "";
-            liveMonitor.pause();
-            updateLiveStatus(false);
-        }
+    // **Handle Live Status Updates from Main Process**
+    ipcRenderer.on("stream-status", (event, status) => {
+        updateLiveStatus(status);
     });
-
-    const devices = await getVideoDevices();
-    if (devices.length > 0) {
-        console.log("Available cameras:", devices);
-    } else {
-        console.warn("No cameras detected.");
-    }
 });

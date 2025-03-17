@@ -2,56 +2,95 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 
-let mainWindow;
-let ffmpegProcesses = {}; // Store FFmpeg processes per camera
+let ffmpegProcess;
+const rtmpUrl = "rtmp://localhost/live/stream";
+let mainWindow = null;
 
 app.whenReady().then(() => {
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
         webPreferences: {
-            preload: path.join(__dirname, "preload.js"), // ✅ Load Preload
-            nodeIntegration: false,
-            contextIsolation: true, // ✅ Securely expose API
+            nodeIntegration: true,
+            contextIsolation: false,
         },
     });
 
     mainWindow.loadFile("index.html");
-});
 
-// **Start Streaming with FFmpeg**
-ipcMain.on("start-ffmpeg", (event, cameraId) => {
-    console.log(`🚀 Starting FFmpeg for ${cameraId}`);
+    // Handle file drag-and-drop events
+    ipcMain.on("file-dropped", (event, fileData) => {
+        console.log("File received in main process:", fileData);
+        mainWindow.webContents.send("add-to-playlist", fileData);
+    });
 
-    const rtmpUrl = `rtmp://localhost/live/${cameraId}`;
+// **Start FFmpeg Streaming with Selected Camera**
+ipcMain.on("start-ffmpeg", (event, rtmpUrl, cameraId) => {
+    if (!cameraId) {
+        console.warn("No camera selected for streaming.");
+        return;
+    }
 
-    ffmpegProcesses[cameraId] = spawn("ffmpeg", [
+    if (ffmpegProcess) {
+        console.warn("FFmpeg is already running.");
+        return;
+    }
+
+    console.log(`Starting stream from camera: ${cameraId}`);
+
+    ffmpegProcess = spawn("ffmpeg", [
         "-f", "dshow",
-        "-i", `video=${cameraId}`,
+        "-i", `video=${cameraId}`, // Use the selected camera
         "-vcodec", "libx264",
         "-preset", "ultrafast",
+        "-b:v", "3000k",
+        "-maxrate", "3000k",
+        "-bufsize", "6000k",
+        "-pix_fmt", "yuv420p",
+        "-g", "50",
         "-f", "flv",
         rtmpUrl,
     ]);
 
-    ffmpegProcesses[cameraId].stderr.on("data", (data) => console.error(`FFmpeg Error (${cameraId}): ${data}`));
-    ffmpegProcesses[cameraId].on("close", (code) => {
-        console.log(`FFmpeg for ${cameraId} exited with code ${code}`);
-        delete ffmpegProcesses[cameraId];
-        event.sender.send("stream-status", { cameraId, status: false });
+    ffmpegProcess.stdout.on("data", (data) => console.log(`FFmpeg: ${data}`));
+    ffmpegProcess.stderr.on("data", (data) => console.error(`FFmpeg Error: ${data}`));
+    ffmpegProcess.on("close", (code) => {
+        console.log(`FFmpeg exited with code ${code}`);
+        mainWindow.webContents.send("stream-status", false);
     });
 
-    event.sender.send("stream-status", { cameraId, status: true });
+    // Send "Live" status to the renderer
+    mainWindow.webContents.send("stream-status", true);
 });
 
-// **Stop Streaming**
-ipcMain.on("stop-ffmpeg", (event, cameraId) => {
-    if (!ffmpegProcesses[cameraId]) {
-        console.warn(`No FFmpeg process running for ${cameraId}`);
-        return;
-    }
+// **Stop FFmpeg Streaming**
+ipcMain.on("stop-ffmpeg", () => {
+    if (ffmpegProcess) {
+        ffmpegProcess.kill();
+        console.log("FFmpeg process stopped.");
+        ffmpegProcess = null;
 
-    console.log(`🛑 Stopping FFmpeg for ${cameraId}`);
-    ffmpegProcesses[cameraId].kill("SIGTERM");
-    delete ffmpegProcesses[cameraId];
+        // Send "Offline" status to the renderer
+        mainWindow.webContents.send("stream-status", false);
+    }
+});
+
+// **Save Stream Session**
+ipcMain.on("save-stream", () => {
+    console.log("Saving live stream to file...");
+    
+    const saveProcess = spawn("ffmpeg", [
+        "-i", rtmpUrl,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "recorded_stream.mp4"
+    ]);
+
+    saveProcess.stdout.on("data", (data) => console.log(`Recording: ${data}`));
+    saveProcess.stderr.on("data", (data) => console.error(`Recording Error: ${data}`));
+    saveProcess.on("close", (code) => console.log(`Recording saved. Exit code: ${code}`));
+});
+
+app.on("before-quit", () => {
+    if (ffmpegProcess) ffmpegProcess.kill();
 });
