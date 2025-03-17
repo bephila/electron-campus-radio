@@ -1,6 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const { spawn } = require("child_process");
-const path = require("path");
 
 let ffmpegProcess;
 const rtmpUrl = "rtmp://localhost/live/stream";
@@ -8,8 +7,8 @@ let mainWindow = null;
 
 app.whenReady().then(() => {
     mainWindow = new BrowserWindow({
-        width: 1200,
-        height: 800,
+        width: 800,
+        height: 600,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -17,12 +16,7 @@ app.whenReady().then(() => {
     });
 
     mainWindow.loadFile("index.html");
-
-    // Handle file drag-and-drop events
-    ipcMain.on("file-dropped", (event, fileData) => {
-        console.log("File received in main process:", fileData);
-        mainWindow.webContents.send("add-to-playlist", fileData);
-    });
+});
 
 // **Start FFmpeg Streaming with Selected Camera**
 ipcMain.on("start-ffmpeg", (event, rtmpUrl, cameraId) => {
