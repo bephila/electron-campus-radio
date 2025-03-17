@@ -102,7 +102,7 @@
     <!-- Bottom Section: Playlist, Audio & Video Import Lists -->
     <div class="bottom-section">
         <!-- Playlist -->
-        <div class="playlist" id="playlist">
+        <div class="playlist" id="playlist" ondragover="allowDrop(event)" ondrop="dropItem(event)">
             <h3>Playlist</h3>
             <table>
                 <thead>
@@ -112,11 +112,11 @@
                         <th>Length</th>
                     </tr>
                 </thead>
-                <tbody id="playlist-items" ondragover="allowDrop(event)" ondrop="dropItem(event)">
+                <tbody id="playlist-items">
                     <tr class="drop-placeholder">
                         <td colspan="3" style="text-align: center; color: gray;">Drag & drop items here</td>
                     </tr>
-                </tbody>                               
+                </tbody>
             </table>
         </div>
         <!-- Audio Media Library (Only MP3) -->
@@ -229,77 +229,101 @@
 
         // Drag-and-Drop Functions
         function dragItem(event) {
-            let target = event.target.closest("tr"); // Ensure dragging works on row level
-            if (!target) return;
+            let target = event.target;
+
+            // Ensure target is a valid element
+            if (!(target instanceof HTMLElement)) {
+                console.warn("Invalid drag event target:", target);
+                return;
+            }
+
+            let row = target.closest("tr"); // ✅ Ensure it is a table row
+            if (!row) {
+                console.warn("Drag started outside a valid row.");
+                return;
+            }
 
             let fileData = {
-                fileName: target.dataset.fileName,
-                fileType: target.dataset.fileType,
-                fileUrl: target.dataset.fileUrl,
-                fileDuration: target.dataset.fileDuration || "--:--"
+                fileName: row.dataset.fileName,
+                fileType: row.dataset.fileType,
+                fileUrl: row.dataset.fileUrl,
+                fileDuration: row.dataset.fileDuration || "--:--"
             };
 
             event.dataTransfer.setData("text/plain", JSON.stringify(fileData));
 
-            console.log("Dragging item:", fileData); // ✅ Debugging log
+            console.log("Dragging item:", fileData);
         }
-
 
         function allowDrop(event) {
             event.preventDefault();
             event.stopPropagation();
-            console.log("Drag over event detected!"); // ✅ Debugging log
+
+            // Add a visual highlight when dragging over the playlist section
+            let dropZone = document.getElementById("playlist");
+            dropZone.style.border = "2px dashed #ffaa00";
+            dropZone.style.background = "#333333";
         }
 
         function dropItem(event) {
             event.preventDefault();
             event.stopPropagation();
 
-            console.log("Drag over event detected!");
-
             let data = event.dataTransfer.getData("text/plain");
+
             if (!data) {
                 console.warn("No data received from drag event.");
                 return;
             }
 
-            let fileData = JSON.parse(data);
-            console.log("Dropped file:", fileData);
+            try {
+                let fileData = JSON.parse(data);
 
-            // Ensure the playlist tbody exists
-            let playlistTable = document.getElementById("playlist-items");
-            if (!playlistTable) {
-                console.error("Playlist table not found!");
-                return;
+                // Validate required fields
+                if (!fileData.fileName || !fileData.fileUrl) {
+                    console.error("Invalid file data:", fileData);
+                    return;
+                }
+
+                console.log("Dropped file:", fileData);
+
+                // Ensure the playlist exists
+                let playlistTable = document.getElementById("playlist-items");
+                if (!playlistTable) {
+                    console.error("Playlist table not found!");
+                    return;
+                }
+
+                // Remove placeholder row if it exists
+                let placeholderRow = document.querySelector(".drop-placeholder");
+                if (placeholderRow) placeholderRow.remove();
+
+                // Add the file to the playlist
+                let row = document.createElement("tr");
+                row.dataset.fileName = fileData.fileName;
+                row.dataset.fileType = fileData.fileType;
+                row.dataset.fileUrl = fileData.fileUrl;
+                row.dataset.fileDuration = fileData.fileDuration;
+
+                let titleCell = document.createElement("td");
+                titleCell.textContent = fileData.fileName;
+
+                let typeCell = document.createElement("td");
+                typeCell.textContent = fileData.fileType || "Audio";
+
+                let lengthCell = document.createElement("td");
+                lengthCell.textContent = fileData.fileDuration || "--:--";
+
+                row.appendChild(titleCell);
+                row.appendChild(typeCell);
+                row.appendChild(lengthCell);
+
+                playlistTable.appendChild(row);
+
+                console.log("File successfully added to playlist:", fileData.fileName);
+            } catch (error) {
+                console.error("Error parsing JSON in dropItem():", error);
             }
-
-            // Remove placeholder row if this is the first item
-            let placeholderRow = document.querySelector(".drop-placeholder");
-            if (placeholderRow) placeholderRow.remove();
-
-            // Add new row to the playlist
-            let row = document.createElement("tr");
-            row.dataset.fileName = fileData.fileName;
-            row.dataset.fileType = fileData.fileType;
-            row.dataset.fileUrl = fileData.fileUrl;
-            row.dataset.fileDuration = fileData.fileDuration;
-
-            let titleCell = document.createElement("td");
-            titleCell.textContent = fileData.fileName;
-
-            let typeCell = document.createElement("td");
-            typeCell.textContent = fileData.fileType || "Audio";
-
-            let lengthCell = document.createElement("td");
-            lengthCell.textContent = fileData.fileDuration || "--:--";
-
-            row.appendChild(titleCell);
-            row.appendChild(typeCell);
-            row.appendChild(lengthCell);
-
-            playlistTable.appendChild(row);
-
-            console.log("File successfully added to playlist:", fileData.fileName);
         }
 
         function addToPlaylist(fileData) {
