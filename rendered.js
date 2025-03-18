@@ -37,24 +37,23 @@ document.addEventListener("DOMContentLoaded", () => {
     async function goLive(cameraId) {
         try {
             console.log(`Attempting to start camera: ${cameraId}`);
-    
+
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: true, 
+                video: true, // Gets the first available camera
                 audio: false
             });
-    
+
             const videoElement = document.getElementById(cameraId);
             videoElement.srcObject = stream;
             videoElement.play();
             mediaStreams[cameraId] = stream;
             activeCameraId = cameraId;
-    
+
             console.log(`Camera ${cameraId} is now live.`);
         } catch (error) {
-            alert("Unable to access the camera. Please check permissions.");
             console.error(`Error accessing camera ${cameraId}:`, error);
         }
-    }    
+    }
 
     // **Stop a Specific Camera**
     function stopLive(cameraId) {
