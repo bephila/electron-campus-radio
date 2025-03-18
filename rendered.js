@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let activeCameraId = null;
     let isStreaming = false;
     let rtmpUrl = "rtmp://localhost/live/stream";
+    let currentDeck = "deckA"; // Track which deck should play next
 
     function updateLiveStatus(status) {
         if (status) {
@@ -109,7 +110,8 @@ document.addEventListener("DOMContentLoaded", () => {
     ipcRenderer.on("stream-status", (event, status) => {
         updateLiveStatus(status);
     });
-    
+
+    // **Auto Crossfade Between Decks**
     document.getElementById("fadeButton").addEventListener("click", function () {
         let deckA = document.getElementById("deckA");
         let deckB = document.getElementById("deckB");
@@ -130,5 +132,77 @@ document.addEventListener("DOMContentLoaded", () => {
                 deckA.pause();
             }
         }, fadeTime / 20);
-    });    
+    });
+
+    // **Auto-Load Songs to Decks**
+    function loadToDeck(fileData) {
+        let deckA = document.getElementById("deckA");
+        let deckB = document.getElementById("deckB");
+        let liveMonitor = document.getElementById("liveMonitor");
+
+        if (fileData.fileType === "audio") {
+            if (!deckA.src || currentDeck === "deckA") {
+                deckA.src = fileData.fileUrl;
+                deckA.play(); // Auto-play Deck A
+                currentDeck = "deckB"; // Switch next song to Deck B
+                console.log("Playing on Deck A:", fileData.fileName);
+            } else {
+                deckB.src = fileData.fileUrl;
+                currentDeck = "deckA"; // Switch back to Deck A for the next song
+                console.log("Queued to Deck B:", fileData.fileName);
+            }
+        } else if (fileData.fileType === "video") {
+            liveMonitor.src = fileData.fileUrl;
+            liveMonitor.play();
+            console.log("Playing video on live monitor:", fileData.fileName);
+        }
+    }
+
+    // **Auto-Play Next Deck When Current One Ends**
+    document.getElementById("deckA").addEventListener("ended", function () {
+        let deckB = document.getElementById("deckB");
+        if (deckB.src) {
+            deckB.play();
+            currentDeck = "deckA"; // Switch next song back to Deck A
+            console.log("Deck A finished. Playing Deck B.");
+        }
+    });
+
+    document.getElementById("deckB").addEventListener("ended", function () {
+        let deckA = document.getElementById("deckA");
+        if (deckA.src) {
+            deckA.play();
+            currentDeck = "deckB"; // Switch next song back to Deck B
+            console.log("Deck B finished. Playing Deck A.");
+        }
+    });
+
+    // **Modify dropItem() to Auto-Send Songs to Decks**
+    function dropItem(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        let data = event.dataTransfer.getData("text/plain");
+        if (!data) {
+            console.warn("No data received from drag event.");
+            return;
+        }
+
+        try {
+            let fileData = JSON.parse(data);
+            console.log("Dropped file:", fileData);
+
+            // Load song into Deck A or Deck B
+            loadToDeck(fileData);
+        } catch (error) {
+            console.error("Error parsing JSON in dropItem():", error);
+        }
+    }
+
+    // **Ensure playlist is a drop zone**
+    document.getElementById("playlist").addEventListener("dragover", (event) => {
+        event.preventDefault();
+    });
+
+    document.getElementById("playlist").addEventListener("drop", dropItem);
 });
