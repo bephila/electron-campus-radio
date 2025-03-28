@@ -29,9 +29,7 @@ async function goLive(cameraId) {
 
     try {
         let deviceId = videoElement.dataset.deviceId;
-
         if (!deviceId) {
-            console.warn(`No device assigned for ${cameraId}. Selecting default.`);
             const devices = await navigator.mediaDevices.enumerateDevices();
             const videoDevices = devices.filter(device => device.kind === 'videoinput');
             if (videoDevices.length > 0) {
@@ -49,13 +47,16 @@ async function goLive(cameraId) {
             videoElement.dataset.ready = "true";
         }
 
-        // Set the selected camera as the live preview
-        liveMonitor.srcObject = videoElement.srcObject;
-        liveMonitor.play();
+        if (!deckA.dataset.fileType || deckA.dataset.fileType !== "video") {
+            liveMonitor.srcObject = videoElement.srcObject;
+            liveMonitor.play();
+        }
+
     } catch (error) {
         console.error("Error accessing camera:", error);
     }
 }
+
 
 // Function to stop a specific camera stream
 function stopLive(cameraId) {
