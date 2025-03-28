@@ -443,9 +443,6 @@
             console.log("File successfully added to playlist:", fileData.fileName);
         }
 
-        // When Deck A ends, shift the track from Deck B into Deck A.
-        deckA.addEventListener("ended", shiftTracks);
-
         // Attach click event for manually playing video files from the playlist.
         document.getElementById("playlist-items").addEventListener("click", function(event) {
             const row = event.target.closest("tr");
