@@ -1,3 +1,4 @@
+let activeCameraId = null;
 // Initialize all cameras on page load
 async function startLiveVideo() {
     const cameras = ["cam1", "cam2", "cam3", "cam4"];
@@ -52,6 +53,9 @@ async function goLive(cameraId) {
         // Set the selected camera as the live preview
         liveMonitor.srcObject = videoElement.srcObject;
         liveMonitor.play();
+
+        // Store the active camera for streaming
+        activeCameraId = cameraId;
     } catch (error) {
         console.error("Error accessing camera:", error);
     }
@@ -76,73 +80,146 @@ function stopLive(cameraId) {
     }
 }
 
-// Settings - Change camera input
-async function showSettings(settingsId, camId, event) {
-    // Get available video input devices
+// Global variable to track which camera is currently active
+async function showSettings(button, settingsId, camId) {
+  // Toggle off if already open
+  const existingMenu = document.getElementById(settingsId);
+  if (existingMenu) {
+    existingMenu.remove();
+    return;
+  }
+
+  try {
+    // 1. Enumerate cameras
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoDevices = devices.filter(device => device.kind === 'videoinput');
-
+    const videoDevices = devices.filter(d => d.kind === "videoinput");
     if (videoDevices.length === 0) {
-        alert("No video devices found.");
-        return;
+      alert("No camera devices found!");
+      return;
     }
 
-    // Remove existing settings dropdown if already open
-    let existingMenu = document.getElementById(settingsId);
-    if (existingMenu) {
-        existingMenu.remove();
-        return;
-    }
-
-    // Create a new dropdown menu for camera selection
-    let settingsDiv = document.createElement("div");
+    // 2. Create the dropdown container
+    const settingsDiv = document.createElement("div");
     settingsDiv.id = settingsId;
     settingsDiv.className = "settings-menu";
 
+    // 3. Create a <select> for camera choices
     const select = document.createElement("select");
+    select.classList.add("camera-select");
 
-    // Populate dropdown with available cameras
+    // Optionally strip out the "@device_pnp..." parts for readability
     videoDevices.forEach((device, index) => {
-        const option = document.createElement("option");
-        option.value = device.deviceId;
-        option.textContent = device.label || `Camera ${index + 1}`;
-        select.appendChild(option);
+      const friendlyLabel = getFriendlyName(device.label, `Camera ${index + 1}`);
+      const option = document.createElement("option");
+      option.value = device.deviceId;       // the actual deviceId
+      option.textContent = friendlyLabel;   // user-friendly label
+      select.appendChild(option);
     });
 
-    // Preselect the current camera if it exists
+    // 4. If a device is already saved on the video element, pre-select it
     const videoElement = document.getElementById(camId);
-    if (videoElement && videoElement.dataset.deviceId) {
-        select.value = videoElement.dataset.deviceId;
+    if (videoElement.dataset.deviceId) {
+      select.value = videoElement.dataset.deviceId;
     }
 
-    // Set up event listener to switch the camera when selected
-    select.addEventListener("change", async (event) => {
-        const selectedDeviceId = event.target.value;
-        videoElement.dataset.deviceId = selectedDeviceId;
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: selectedDeviceId } }
-            });
-
-            // Set the new stream to the video element
-            videoElement.srcObject = stream;
-            videoElement.play();
-        } catch (error) {
-            console.error("Error accessing the selected camera:", error);
-        }
+    // 5. Handle user selection
+    select.addEventListener("change", (e) => {
+      const chosenDeviceId = e.target.value;
+      videoElement.dataset.deviceId = chosenDeviceId;
+      // Immediately update the camera preview
+      updateCameraPreview(camId, chosenDeviceId);
     });
 
-    // Append dropdown to settings menu
     settingsDiv.appendChild(select);
-    document.body.appendChild(settingsDiv);
 
-    // Position settings menu near the button
-    const button = event.target;
+    // 6. Position the dropdown near the button
+    const buttonRect = button.getBoundingClientRect();
     settingsDiv.style.position = "absolute";
-    settingsDiv.style.left = button.getBoundingClientRect().left + "px";
-    settingsDiv.style.top = button.getBoundingClientRect().bottom + "px";
+    settingsDiv.style.left = `${buttonRect.left}px`;
+    settingsDiv.style.top = `${buttonRect.bottom}px`;
+    settingsDiv.style.zIndex = 9999;
+
+    document.body.appendChild(settingsDiv);
+  } catch (err) {
+    console.error("Error enumerating devices:", err);
+  }
 }
 
+// Helper to remove any @device_pnp... suffix for a friendlier label
+function getFriendlyName(label, fallback) {
+  if (!label) return fallback;
+  const atIndex = label.indexOf('@');
+  if (atIndex > -1) {
+    return label.substring(0, atIndex).trim();
+  }
+  return label.trim();
+}
+
+// Update the preview for a given camera element
+async function updateCameraPreview(camId, deviceId) {
+  try {
+    const videoElement = document.getElementById(camId);
+
+    // Stop any existing stream
+    if (videoElement.srcObject) {
+      videoElement.srcObject.getTracks().forEach(track => track.stop());
+    }
+
+    // Request a new stream with the selected device
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId } },
+      audio: false
+    });
+
+    videoElement.srcObject = stream;
+    videoElement.play();
+  } catch (error) {
+    console.error(`Error updating preview for ${camId}:`, error);
+  }
+}
+
+
+// Update the live monitor preview (assumes liveMonitor is a separate video element)
+async function updateLiveMonitor(deviceId) {
+  try {
+    const liveMonitor = document.getElementById("liveMonitor");
+    if (liveMonitor.srcObject) {
+      liveMonitor.srcObject.getTracks().forEach(track => track.stop());
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId } },
+      audio: false
+    });
+    liveMonitor.srcObject = stream;
+    liveMonitor.play();
+  } catch (error) {
+    console.error("Error updating live monitor:", error);
+  }
+}
+
+  
+  // Optional: A helper to update the live preview for a given camera element
+  async function updateCameraPreview(camId, deviceId) {
+    try {
+      const videoElement = document.getElementById(camId);
+      // Stop existing stream if any
+      if (videoElement.srcObject) {
+        videoElement.srcObject.getTracks().forEach(track => track.stop());
+      }
+  
+      // Request new stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: deviceId } },
+        audio: false
+      });
+  
+      videoElement.srcObject = stream;
+      videoElement.play();
+    } catch (error) {
+      console.error(`Error updating preview for ${camId}:`, error);
+    }
+  }
+  
+  
 // Initialize setup on page load
 window.onload = startLiveVideo;

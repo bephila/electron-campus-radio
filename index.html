@@ -20,7 +20,7 @@
                 <button class="icon-button" onclick="stopLive('cam1')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button settings-button" onclick="showSettings('settings1', 'cam1', event)">
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings1', 'cam1')">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -34,7 +34,7 @@
                 <button class="icon-button" onclick="stopLive('cam2')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button settings-button" onclick="showSettings('settings2', 'cam2', event)">
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings2', 'cam2')">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -48,7 +48,7 @@
                 <button class="icon-button" onclick="stopLive('cam3')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button settings-button" onclick="showSettings('settings3', 'cam3', event)">
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings3', 'cam3')">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -62,7 +62,7 @@
                 <button class="icon-button" onclick="stopLive('cam4')">
                     <img src="icons/bx-stop.svg" alt="Stop">
                 </button>
-                <button class="icon-button settings-button" onclick="showSettings('settings4', 'cam4', event)">
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings4', 'cam4')">
                     <img src="icons/bxs-cog.svg" alt="Settings">
                 </button>
             </div>
@@ -71,18 +71,16 @@
     </div>
 
     <!-- Live Monitor -->
-        <div class="live-video-monitor">
-            <h3>Live Monitor</h3>
-            <video id="liveMonitor" autoplay playsinline></video>
-
-            <div id="live-status" class="live-off"> Offline </div>
-                <!-- Streaming & Recording Controls -->
-            <div class="streaming-controls">
-                <button id="start-stream">Start Live Stream</button>
-                <button id="stop-stream">Stop Stream</button>
-                <button id="save-session">Save Session</button>
-            </div>
+    <div class="live-video-monitor">
+        <h3>Live Monitor</h3>
+        <video id="liveMonitor" autoplay playsinline></video>
+        <div id="live-status" class="live-off">Offline</div>
+        <div class="streaming-controls">
+          <button id="start-stream">Start Live Stream</button>
+          <button id="stop-stream">Stop Stream</button>
+          <button id="save-session">Save Session</button>
         </div>
+      </div>
     </div>
 
     
@@ -175,7 +173,7 @@
                 if (!file) return;
 
                 let row = document.createElement("tr");
-                row.setAttribute('draggable', true); // ✅ Explicitly enable dragging
+                row.setAttribute('draggable', true); //  Explicitly enable dragging
                 row.dataset.fileName = file.name;
                 row.dataset.fileType = mediaType;
                 row.dataset.fileUrl = URL.createObjectURL(file);
@@ -366,7 +364,6 @@
     
     <script src="rendered.js"></script>
     <script src="live-video.js"></script>
-    <script src="get-video-devices.js"></script>
 </body>
 </html>
  
