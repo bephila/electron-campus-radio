@@ -70,21 +70,18 @@
         </div>
     </div>
 
-    <!-- Live Monitor -->
-        <div class="live-video-monitor">
-            <h3>Live Monitor</h3>
-            <video id="liveMonitor" autoplay playsinline></video>
-
-            <div id="live-status" class="live-off"> Offline </div>
-                <!-- Streaming & Recording Controls -->
-            <div class="streaming-controls">
-                <button id="start-stream">Start Live Stream</button>
-                <button id="stop-stream">Stop Stream</button>
-                <button id="save-session">Save Session</button>
-            </div>
+    <div class="live-video-monitor">
+        <h3>Live Monitor</h3>
+        <div class="video-wrapper">
+          <video id="liveMonitor" autoplay playsinline></video>
         </div>
-    </div>
-
+        <div id="live-status" class="live-off">Offline</div>
+        <div class="streaming-controls">
+          <button id="start-stream">Start Live Stream</button>
+          <button id="stop-stream">Stop Stream</button>
+          <button id="save-session">Save Session</button>
+        </div>
+      </div>      
     
     <!-- DJ Decks -->
     <div id="player" class="decks">
@@ -370,4 +367,3 @@
     <script src="get-video-devices.js"></script>
 </body>
 </html>
- 
