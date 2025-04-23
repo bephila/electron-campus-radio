@@ -12,39 +12,6 @@ body {
     align-items: center;
     justify-content: center;
 }
-.video-wrapper {
-    width: 80%;
-    max-width: 900px;
-    margin: 0 auto;
-    position: relative;
-    background: #000;        /* Black background for letterboxing */
-    aspect-ratio: 16 / 9;     /* Enforce a 16:9 aspect ratio */
-  }
-  
-  /* Style the video to fill the container without distortion */
-  #liveMonitor {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;      /* Contain ensures the entire video fits with letterboxing */
-    border: 2px solid black;
-    border-radius: 10px;
-  }
-  
-  /* Ensure the streaming controls are below the video-wrapper */
-  .live-video-monitor {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-top: 20px;
-  }
-  
-  .streaming-controls {
-    text-align: center;
-    margin-top: 1rem;
-  }
 
 h1 {
     text-align: center;
@@ -146,6 +113,14 @@ video {
     display: flex;
     flex-direction: column;
     align-items: center;
+}
+
+#liveMonitor {
+    width: 80%;
+    max-width: 900px;
+    height: auto;
+    border: 2px solid black;
+    border-radius: 10px;
 }
 
 .settings-icon {
