@@ -1,70 +1,12 @@
 const { ipcRenderer } = require("electron");
 
-let currentCamera = null; // tracks the camera used in the preview (e.g. "cam1")
-const liveStatus = document.getElementById("live-status");
-
-// Main initialization once DOM is ready.
-document.addEventListener("DOMContentLoaded", async () => {
-  // 1. Populate FFmpeg streaming device dropdown (if used)
-  try {
-    const ffmpegDevices = await ipcRenderer.invoke("get-ffmpeg-devices");
-    console.log("DirectShow devices from FFmpeg:", ffmpegDevices);
-    const streamSelect = document.getElementById("streamSelect");
-    if (streamSelect) {
-      ffmpegDevices.forEach(name => {
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        streamSelect.appendChild(option);
-      });
-      document.getElementById("start-stream").addEventListener("click", async () => {
-        console.log("Start Live Stream button clicked!");
-        const ffmpegDeviceName = streamSelect.value;
-        console.log("Selected FFmpeg device:", ffmpegDeviceName);
-        // Map the FFmpeg device name to browser device ID.
-        const browserDeviceId = await getBrowserDeviceIdForFFmpegName(ffmpegDeviceName);
-        if (!browserDeviceId) {
-          alert("No matching browser device found for the selected camera.");
-          return;
-        }
-        console.log("Mapped to browser device ID:", browserDeviceId);
-        // Update live monitor preview with the browser device stream.
-        await updateCameraPreview("liveMonitor", browserDeviceId);
-        const rtmpUrl = "rtmp://localhost/live/stream";
-        console.log("Starting FFmpeg stream with:", rtmpUrl, ffmpegDeviceName);
-        ipcRenderer.send("start-ffmpeg", rtmpUrl, ffmpegDeviceName);
-      });
-    }
-  } catch (err) {
-    console.error("Error fetching FFmpeg devices:", err);
-  }
-
-  // 2. Attach stop-stream listener.
-  document.getElementById("stop-stream").addEventListener("click", () => {
-    ipcRenderer.send("stop-ffmpeg");
-  });
-
-  // 3. Listen for stream status updates.
-  ipcRenderer.on("stream-status", (event, status) => {
-    updateLiveStatus(status);
-  });
-
-  // 4. Listen for stream errors.
-  ipcRenderer.on("stream-error", (event, error) => {
-    console.error("Streaming error:", error);
-    alert(`Streaming error: ${error}`);
-  });
-
-  // 5. Populate available devices (browser side) for each preview camera.
-  await populateCameraDevices();
-});
-
 //////////////////////////
 // Helper Functions
 //////////////////////////
 
 // Update the live status UI.
 function updateLiveStatus(status) {
+  const liveStatus = document.getElementById("live-status");
   if (status) {
     liveStatus.textContent = "Live";
     liveStatus.classList.remove("live-off");
@@ -74,6 +16,24 @@ function updateLiveStatus(status) {
     liveStatus.classList.remove("live-on");
     liveStatus.classList.add("live-off");
   }
+}
+
+/**
+ * If liveMonitor is already playing something, confirm first;
+ * then run `action()`.
+ */
+function confirmAndReplaceLiveMonitor(action) {
+  const liveMonitor = document.getElementById("liveMonitor");
+  const hasSomethingPlaying =
+    (liveMonitor.srcObject && liveMonitor.srcObject.active) ||
+    !!liveMonitor.currentSrc;
+  if (hasSomethingPlaying) {
+    const ok = confirm(
+      "There’s already something playing in Live Monitor.\nDo you want to replace it?"
+    );
+    if (!ok) return;
+  }
+  action();
 }
 
 // Map an FFmpeg DirectShow device name to a browser deviceId.
@@ -135,36 +95,36 @@ async function populateCameraDevices() {
 
 // When the user clicks "Go Live" on a camera, show its stream in the live monitor.
 window.goLive = async function(cameraId) {
-  console.log(`goLive called for ${cameraId}`);
-  const videoElement = document.getElementById(cameraId);
-  const liveMonitor = document.getElementById("liveMonitor");
-  try {
-    let deviceId = videoElement.dataset.deviceId;
-    if (!deviceId) {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      if (videoDevices.length > 0) {
-        deviceId = videoDevices[0].deviceId;
-        videoElement.dataset.deviceId = deviceId;
-      }
+  confirmAndReplaceLiveMonitor(async () => {
+    const liveMonitor = document.getElementById("liveMonitor");
+    // stop existing stream
+    if (liveMonitor.srcObject) {
+      liveMonitor.srcObject.getTracks().forEach(t => t.stop());
+      liveMonitor.srcObject = null;
     }
-    if (!videoElement.dataset.ready || videoElement.dataset.ready === "false") {
+    const videoElement = document.getElementById(cameraId);
+
+    // If camera preview isn’t already rolling, start it
+    if (!videoElement.srcObject) {
+      const deviceId = videoElement.dataset.deviceId ||
+        (await navigator.mediaDevices
+          .enumerateDevices()
+          .then(list => list.find(d => d.kind === "videoinput").deviceId));
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { deviceId: { exact: deviceId } },
         audio: false
       });
       videoElement.srcObject = stream;
-      videoElement.play();
+      videoElement.dataset.deviceId = deviceId;
       videoElement.dataset.ready = "true";
+      videoElement.play();
     }
-    // Set the live monitor to the same stream.
+
+    // Send that same stream into liveMonitor
     liveMonitor.srcObject = videoElement.srcObject;
     liveMonitor.play();
     console.log(`Camera ${cameraId} is now live.`);
-    currentCamera = cameraId;
-  } catch (error) {
-    console.error("Error in goLive:", error);
-  }
+  });
 };
 
 // Stop a camera stream.
@@ -246,7 +206,43 @@ window.showSettings = async function(button, settingsId, camId) {
 
 
 // Bruce 
-    document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  // 1. Populate FFmpeg streaming device dropdown (if used)
+  try {
+    const ffmpegDevices = await ipcRenderer.invoke("get-ffmpeg-devices");
+    console.log("DirectShow devices from FFmpeg:", ffmpegDevices);
+    const streamSelect = document.getElementById("streamSelect");
+    if (streamSelect) {
+      ffmpegDevices.forEach(name => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        streamSelect.appendChild(option);
+      });
+      document.getElementById("start-stream").addEventListener("click", async () => {
+        console.log("Start Live Stream button clicked!");
+        const ffmpegDeviceName = streamSelect.value;
+        console.log("Selected FFmpeg device:", ffmpegDeviceName);
+        // Map the FFmpeg device name to browser device ID.
+        const browserDeviceId = await getBrowserDeviceIdForFFmpegName(ffmpegDeviceName);
+        if (!browserDeviceId) {
+          alert("No matching browser device found for the selected camera.");
+          return;
+        }
+        console.log("Mapped to browser device ID:", browserDeviceId);
+        // Update live monitor preview with the browser device stream.
+        await updateCameraPreview("liveMonitor", browserDeviceId);
+        const rtmpUrl = "rtmp://localhost/live/stream";
+        console.log("Starting FFmpeg stream with:", rtmpUrl, ffmpegDeviceName);
+        ipcRenderer.send("start-ffmpeg", rtmpUrl, ffmpegDeviceName);
+      });
+    }
+  } catch (err) {
+    console.error("Error fetching FFmpeg devices:", err);
+  }
+
+  await populateCameraDevices();
+
         const liveMonitor = document.getElementById("liveMonitor");
         const liveStatus = document.getElementById("live-status");
         const playlistDropZone = document.getElementById("playlist");
@@ -357,18 +353,6 @@ window.showSettings = async function(button, settingsId, camId) {
             processPlaylist();
         }        
 
-        function updateLiveStatus(status) {
-            if (status) {
-                liveStatus.textContent = "Live";
-                liveStatus.classList.remove("live-off");
-                liveStatus.classList.add("live-on");
-            } else {
-                liveStatus.textContent = "Offline";
-                liveStatus.classList.remove("live-on");
-                liveStatus.classList.add("live-off");
-            }
-        }
-
         function getActiveCamera() {
             for (const camId in mediaStreams) {
                 const videoElement = document.getElementById(camId);
@@ -378,31 +362,6 @@ window.showSettings = async function(button, settingsId, camId) {
                 }
             }
             return null;
-        }
-
-        async function goLive(cameraId) {
-            try {
-                console.log(`Attempting to start camera: ${cameraId}`);
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                const videoElement = document.getElementById(cameraId);
-                videoElement.srcObject = stream;
-                videoElement.play();
-                mediaStreams[cameraId] = stream;
-                activeCameraId = cameraId;
-                console.log(`Camera ${cameraId} is now live.`);
-            } catch (error) {
-                console.error(`Error accessing camera ${cameraId}:`, error);
-            }
-        }
-
-        function stopLive(cameraId) {
-            if (mediaStreams[cameraId]) {
-                mediaStreams[cameraId].getTracks().forEach(track => track.stop());
-                document.getElementById(cameraId).srcObject = null;
-                delete mediaStreams[cameraId];
-                if (activeCameraId === cameraId) activeCameraId = null;
-                console.log(`Camera ${cameraId} stopped.`);
-            }
         }
 
         document.getElementById("start-stream").addEventListener("click", async () => {
@@ -503,47 +462,6 @@ window.showSettings = async function(button, settingsId, camId) {
                 nextRow.remove();
             }        
         }
-        
-        function shiftTracks() {
-            if (deckB.src && deckB.src !== "") {
-                deckA.src = deckB.src;
-                deckA.dataset.fileType = deckB.dataset.fileType;
-                deckA.dataset.fileName = deckB.dataset.fileName;
-                
-                // If the new file is a video, sync with live monitor
-                if (deckA.dataset.fileType === "video") {
-                    liveMonitor.src = deckA.src;
-                    liveMonitor.play();
-                }
-                
-                deckA.play();
-        
-                // Clear Deck B
-                deckB.src = "";
-                deckB.removeAttribute("data-file-type");
-                deckB.removeAttribute("data-file-name");
-            }
-        
-            // Process next song from the playlist
-            processPlaylist();
-        }
-        
-        
-        // Ensure this event listener is correctly set up
-        document.addEventListener("DOMContentLoaded", () => {
-            const deckA = document.getElementById("deckA");
-            
-            deckA.addEventListener("ended", () => {
-                console.log("Deck A track ended, shifting tracks");
-                
-                // Clear Deck A before shifting
-                deckA.src = "";
-                deckA.removeAttribute("data-file-type");
-                deckA.removeAttribute("data-file-name");
-                
-                shiftTracks();
-            });
-        });
 
         // loadToDeck always adds the file to the playlist.
         // For audio files, trigger processPlaylist() so that auto-play happens if appropriate.
@@ -689,22 +607,32 @@ window.showSettings = async function(button, settingsId, camId) {
             console.log("File successfully added to playlist:", fileData.fileName);
         }
 
-        // When Deck A ends, shift the track from Deck B into Deck A.
-        deckA.addEventListener("ended", shiftTracks);
-
-        // Attach click event for manually playing video files from the playlist.
-        document.getElementById("playlist-items").addEventListener("click", function(event) {
-            const row = event.target.closest("tr");
-            if (row && row.dataset.fileType === "video") {
-                deckA.src = row.dataset.fileUrl;
-                deckA.dataset.fileType = row.dataset.fileType;
-                deckA.dataset.fileName = row.dataset.fileName;
-                
-                liveMonitor.src = deckA.src;
-                liveMonitor.play();
-                
-                deckA.play();
-                row.remove();
+        document
+        .getElementById("playlist-items")
+        .addEventListener("click", function(event) {
+          const row = event.target.closest("tr");
+          if (!row || row.dataset.fileType !== "video") return;
+      
+          confirmAndReplaceLiveMonitor(() => {
+            const liveMonitor = document.getElementById("liveMonitor");
+            liveMonitor.pause();
+            if (liveMonitor.srcObject) {
+              liveMonitor.srcObject.getTracks().forEach(t => t.stop());
+              liveMonitor.srcObject = null;
             }
-        });    
-    });
+
+            // Load the new video
+            liveMonitor.src = row.dataset.fileUrl;
+            liveMonitor.play();
+
+            // Mirror to Deck A
+            const deckA = document.getElementById("deckA");
+            deckA.src = row.dataset.fileUrl;
+            deckA.dataset.fileType = row.dataset.fileType;
+            deckA.dataset.fileName = row.dataset.fileName;
+            deckA.play();
+
+            row.remove();
+          });
+});  
+});
