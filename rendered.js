@@ -92,40 +92,47 @@ async function populateCameraDevices() {
 //////////////////////////
 // Global Functions for Inline HTML
 //////////////////////////
+function showCameraStream(stream) {
+  const lm = document.getElementById("liveMonitor");
+  lm.pause(); lm.removeAttribute("src"); lm.removeAttribute("srcObject");
+  lm.srcObject = stream;
+  lm.play();
+}
+
+function showFile(url) {
+  const lm = document.getElementById("liveMonitor");
+  if (lm.srcObject) lm.srcObject.getTracks().forEach(t=>t.stop());
+  lm.pause(); lm.removeAttribute("srcObject");
+  lm.src = url;
+  lm.play();
+}
+
 
 // When the user clicks "Go Live" on a camera, show its stream in the live monitor.
 window.goLive = async function(cameraId) {
   confirmAndReplaceLiveMonitor(async () => {
-    const liveMonitor = document.getElementById("liveMonitor");
-    // stop existing stream
-    if (liveMonitor.srcObject) {
-      liveMonitor.srcObject.getTracks().forEach(t => t.stop());
-      liveMonitor.srcObject = null;
-    }
-    const videoElement = document.getElementById(cameraId);
-
-    // If camera preview isn’t already rolling, start it
-    if (!videoElement.srcObject) {
-      const deviceId = videoElement.dataset.deviceId ||
-        (await navigator.mediaDevices
-          .enumerateDevices()
-          .then(list => list.find(d => d.kind === "videoinput").deviceId));
+    const camEl = document.getElementById(cameraId);
+    // 1) Ensure camEl.srcObject is streaming a MediaStream
+    if (!camEl.srcObject) {
+      const deviceId = camEl.dataset.deviceId
+        || (await navigator.mediaDevices
+             .enumerateDevices()
+             .then(list => list.find(d => d.kind==="videoinput").deviceId));
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: deviceId } },
+        video: { deviceId: { exact: deviceId }}, 
         audio: false
       });
-      videoElement.srcObject = stream;
-      videoElement.dataset.deviceId = deviceId;
-      videoElement.dataset.ready = "true";
-      videoElement.play();
+      camEl.srcObject = stream;
+      camEl.dataset.deviceId = deviceId;
+      camEl.play();
     }
 
-    // Send that same stream into liveMonitor
-    liveMonitor.srcObject = videoElement.srcObject;
-    liveMonitor.play();
+    // 2) Now switch the live monitor over to that stream
+    showCameraStream(camEl.srcObject);
     console.log(`Camera ${cameraId} is now live.`);
   });
 };
+
 
 // Stop a camera stream.
 window.stopLive = function(cameraId) {
@@ -203,8 +210,6 @@ window.showSettings = async function(button, settingsId, camId) {
 };
 
 
-
-
 // Bruce 
 document.addEventListener("DOMContentLoaded", async () => {
   // 1. Populate FFmpeg streaming device dropdown (if used)
@@ -260,8 +265,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         // **Sync Live Monitor when Deck A plays a video**
         deckA.addEventListener("play", () => {
             if (deckA.dataset.fileType === "video") {
-                liveMonitor.src = deckA.src;
-                liveMonitor.play();
+                showFile(deckA.src);
                 deckA.muted = true;
                 console.log("Video playing – deckA muted.");
             } else if (deckA.dataset.fileType === "audio") {
@@ -337,8 +341,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 
                 // For video files, sync with liveMonitor as before
                 if (deckA.dataset.fileType === "video") {
-                    liveMonitor.src = deckA.src;
-                    liveMonitor.play();
+                    showFile(deckA.src);
                 }
                 
                 deckA.play();
@@ -622,8 +625,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
 
             // Load the new video
-            liveMonitor.src = row.dataset.fileUrl;
-            liveMonitor.play();
+            showFile(row.dataset.fileUrl);
 
             // Mirror to Deck A
             const deckA = document.getElementById("deckA");
