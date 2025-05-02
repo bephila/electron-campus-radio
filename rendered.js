@@ -3,7 +3,7 @@ const { ipcRenderer } = require("electron");
 //////////////////////////
 // Helper Functions
 //////////////////////////
-
+liveMonitor.srcObject.getTracks().some(t => t.readyState === "live")
 // Update the live status UI.
 function updateLiveStatus(status) {
   const liveStatus = document.getElementById("live-status");
@@ -25,7 +25,7 @@ function updateLiveStatus(status) {
 function confirmAndReplaceLiveMonitor(action) {
   const liveMonitor = document.getElementById("liveMonitor");
   const hasSomethingPlaying =
-    (liveMonitor.srcObject && liveMonitor.srcObject.active) ||
+    (liveMonitor.srcObject.getTracks().some(t => t.readyState === "live")) ||
     !!liveMonitor.currentSrc;
   if (hasSomethingPlaying) {
     const ok = confirm(
@@ -341,7 +341,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 
                 // For video files, sync with liveMonitor as before
                 if (deckA.dataset.fileType === "video") {
-                    showFile(deckA.src);
+                  showFile(deckA.src);
                 }
                 
                 deckA.play();
