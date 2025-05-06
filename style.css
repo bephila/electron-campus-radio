@@ -109,6 +109,12 @@ video {
     margin-top: 20px;
 }
 
+.live-video-monitor video {
+    width: 100%;
+    height: auto;
+    display: block;
+  }  
+
 .live-video-container {
     display: flex;
     flex-direction: column;

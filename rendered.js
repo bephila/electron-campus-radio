@@ -3,7 +3,6 @@ const { ipcRenderer } = require("electron");
 //////////////////////////
 // Helper Functions
 //////////////////////////
-liveMonitor.srcObject.getTracks().some(t => t.readyState === "live")
 // Update the live status UI.
 function updateLiveStatus(status) {
   const liveStatus = document.getElementById("live-status");
@@ -18,22 +17,13 @@ function updateLiveStatus(status) {
   }
 }
 
-/**
- * If liveMonitor is already playing something, confirm first;
- * then run `action()`.
- */
 function confirmAndReplaceLiveMonitor(action) {
-  const liveMonitor = document.getElementById("liveMonitor");
+  const lm = document.getElementById("liveMonitor");
   const hasSomethingPlaying =
-    (liveMonitor.srcObject.getTracks().some(t => t.readyState === "live")) ||
-    !!liveMonitor.currentSrc;
-  if (hasSomethingPlaying) {
-    const ok = confirm(
-      "There’s already something playing in Live Monitor.\nDo you want to replace it?"
-    );
-    if (!ok) return;
-  }
-  action();
+    (lm.srcObject && lm.srcObject.getTracks().length > 0) ||
+    !!lm.currentSrc;
+    if (hasSomethingPlaying && !confirm("There is currently a media playing, would you like to continue?")) return;
+    action();    
 }
 
 // Map an FFmpeg DirectShow device name to a browser deviceId.
@@ -209,10 +199,30 @@ window.showSettings = async function(button, settingsId, camId) {
   });
 };
 
+function allowDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  const dropZone = document.getElementById("playlist");
+  dropZone.style.border = "2px dashed #ffaa00";
+}
+
+function dropItem(e) {
+  e.preventDefault(); e.stopPropagation();
+  const data = e.dataTransfer.getData("text/plain");
+  if (!data) return;
+  const file = JSON.parse(data);
+
+  const placeholder = document.querySelector(".drop-placeholder");
+  if (placeholder) placeholder.remove();
+
+  loadToDeck(file);
+
+  const dz = document.getElementById("playlist");
+  dz.style.border = "";
+  dz.style.background = "";
+}
 
 // Bruce 
 document.addEventListener("DOMContentLoaded", async () => {
-  // 1. Populate FFmpeg streaming device dropdown (if used)
   try {
     const ffmpegDevices = await ipcRenderer.invoke("get-ffmpeg-devices");
     console.log("DirectShow devices from FFmpeg:", ffmpegDevices);
@@ -228,14 +238,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         console.log("Start Live Stream button clicked!");
         const ffmpegDeviceName = streamSelect.value;
         console.log("Selected FFmpeg device:", ffmpegDeviceName);
-        // Map the FFmpeg device name to browser device ID.
         const browserDeviceId = await getBrowserDeviceIdForFFmpegName(ffmpegDeviceName);
         if (!browserDeviceId) {
           alert("No matching browser device found for the selected camera.");
           return;
         }
         console.log("Mapped to browser device ID:", browserDeviceId);
-        // Update live monitor preview with the browser device stream.
         await updateCameraPreview("liveMonitor", browserDeviceId);
         const rtmpUrl = "rtmp://localhost/live/stream";
         console.log("Starting FFmpeg stream with:", rtmpUrl, ffmpegDeviceName);
@@ -247,22 +255,30 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   await populateCameraDevices();
+  const playlistBody = document.getElementById("playlist-items");
+  playlistBody.addEventListener("dragover",  allowDrop);
+  playlistBody.addEventListener("drop",      dropItem);
+  playlistBody.addEventListener("dragleave", e => {
+    e.preventDefault(); e.stopPropagation();
+    const dz = document.getElementById("playlist");
+    dz.style.border = "";
+    dz.style.background = "";
+  });
 
         const liveMonitor = document.getElementById("liveMonitor");
         const liveStatus = document.getElementById("live-status");
         const playlistDropZone = document.getElementById("playlist");
         const deckA = document.getElementById("deckA");
         const deckB = document.getElementById("deckB");
-        const seekControl = document.getElementById("seekA"); // Seek Bar
-        let mediaStreams = {}; // Store active camera streams
+        const seekControl = document.getElementById("seekA"); 
+        let mediaStreams = {}; 
         let activeCameraId = null;
         let isStreaming = false;
         let rtmpUrl = "rtmp://localhost/live/stream";
-        let draggedRow = null; // Track the dragged row for reordering
-        let lastSeekTimeUpdate = 0; // Used to prevent excessive updates
-        let isScrubbing = false; // Track if user is scrubbing the seek bar
+        let draggedRow = null; 
+        let lastSeekTimeUpdate = 0; 
+        let isScrubbing = false; 
 
-        // **Sync Live Monitor when Deck A plays a video**
         deckA.addEventListener("play", () => {
             if (deckA.dataset.fileType === "video") {
                 showFile(deckA.src);
@@ -274,7 +290,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         });        
         
-        // **Throttled Live Monitor Sync Using requestAnimationFrame**
         function syncLiveMonitor() {
             if (deckA.dataset.fileType === "video" && deckA.duration && !isScrubbing) {
                 requestAnimationFrame(() => {
@@ -286,10 +301,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         }
 
-        // **Throttle updates to prevent stuttering**
         deckA.addEventListener("timeupdate", syncLiveMonitor);
 
-        // **Scrubbing: Seek Deck A & Live Monitor Smoothly**
         seekControl.addEventListener("input", (event) => {
             if (deckA.dataset.fileType === "video" && deckA.duration) {
                 isScrubbing = true;
@@ -300,7 +313,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         });
 
-        // **Resume video after user finishes scrubbing**
         seekControl.addEventListener("change", () => {
             if (deckA.dataset.fileType === "video") {
                 isScrubbing = false;
@@ -308,19 +320,16 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
         });
 
-        // **Prevent seeking in Live Monitor if playing a camera stream**
         liveMonitor.addEventListener("seeking", (event) => {
             if (!deckA.src || deckA.dataset.fileType !== "video") {
                 event.preventDefault();
             }
         });
 
-        // **Pause Live Monitor when Deck A is paused**
         deckA.addEventListener("pause", () => {
             liveMonitor.pause();
         });
 
-        // **Auto-Shift Tracks When Deck A Ends**
         deckA.addEventListener("ended", () => {
             console.log("Deck A video ended, shifting to next track");
             shiftTracks();
@@ -333,26 +342,21 @@ document.addEventListener("DOMContentLoaded", async () => {
                 deckA.dataset.fileType = deckB.dataset.fileType;
                 deckA.dataset.fileName = deckB.dataset.fileName;
                 
-                // If the new track is an audio file (mp3), ensure deck A is unmuted
                 if (deckA.dataset.fileType === "audio") {
                     deckA.muted = false;
                     console.log("Audio track detected – deckA unmuted.");
                 }
-                
-                // For video files, sync with liveMonitor as before
+
                 if (deckA.dataset.fileType === "video") {
                   showFile(deckA.src);
                 }
                 
                 deckA.play();
                 
-                // Clear Deck B
                 deckB.src = "";
                 deckB.removeAttribute("data-file-type");
                 deckB.removeAttribute("data-file-name");
             }
-            
-            // Load next track from the playlist if available.
             processPlaylist();
         }        
 
@@ -403,7 +407,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
 
         document.getElementById("fadeButton").addEventListener("click", function () {
-            let fadeTime = 5000; // 5 seconds fade duration
+            let fadeTime = 5000;
             let startVolumeA = deckA.volume;
             let startVolumeB = deckB.volume;
             let fadeOut = setInterval(() => {
@@ -422,8 +426,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         function processPlaylist() {
             const playlistTable = document.getElementById("playlist-items");
-        
-            // If Deck A is empty, prioritize loading a track to Deck A
             if ((!deckA.src || deckA.src === "") && playlistTable.firstElementChild) {
                 const firstRow = playlistTable.firstElementChild;
                 const fileData = {
@@ -446,8 +448,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 deckA.play();
                 firstRow.remove();
             }
-        
-            // If Deck B is empty and there are playlist items, load a track to Deck B
+
             if ((!deckB.getAttribute("src") || deckB.getAttribute("src") === "") && playlistTable.firstElementChild) {
                 const nextRow = playlistTable.firstElementChild;
                 const fileData = {
@@ -466,16 +467,12 @@ document.addEventListener("DOMContentLoaded", async () => {
             }        
         }
 
-        // loadToDeck always adds the file to the playlist.
-        // For audio files, trigger processPlaylist() so that auto-play happens if appropriate.
         function loadToDeck(fileData) {
             addToPlaylist(fileData);
             if (fileData.fileType === "audio") {
                 processPlaylist();
             }
         }
-
-        // ---- DRAG & DROP HANDLERS ---- //
 
         function handlePlaylistDrop(event) {
             event.preventDefault();
@@ -543,11 +540,9 @@ document.addEventListener("DOMContentLoaded", async () => {
             console.log("Playlist order updated:", playlistItems);
         }
 
-        // Attach drop and dragover events for the playlist container.
         document.getElementById("playlist").addEventListener("drop", handlePlaylistDrop);
         document.getElementById("playlist").addEventListener("dragover", allowDrop);
 
-        // Attach additional dragenter and dragleave events:
         playlistDropZone.addEventListener("dragenter", (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -562,7 +557,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             playlistDropZone.style.background = "";
         });
 
-        // Attach drag & drop events for every row already in the playlist.
         document.querySelectorAll("#playlist-items tr").forEach(row => {
             row.setAttribute("draggable", true);
             row.addEventListener("dragstart", dragItem);
@@ -624,10 +618,8 @@ document.addEventListener("DOMContentLoaded", async () => {
               liveMonitor.srcObject = null;
             }
 
-            // Load the new video
             showFile(row.dataset.fileUrl);
 
-            // Mirror to Deck A
             const deckA = document.getElementById("deckA");
             deckA.src = row.dataset.fileUrl;
             deckA.dataset.fileType = row.dataset.fileType;

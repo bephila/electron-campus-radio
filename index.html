@@ -71,21 +71,22 @@
     </div>
 
     <!-- Live Monitor -->
-        <div class="live-video-monitor">
-            <h3>Live Monitor</h3>
-            <video id="liveMonitor" autoplay playsinline></video>
+    <div class="live-video-monitor">
+        <h3>Live Monitor</h3>
+        <video id="liveMonitor" autoplay playsinline></video>
 
-            <div id="live-status" class="live-off"> Offline </div>
-                <!-- Streaming & Recording Controls -->
+        <div id="live-status" class="live-off"> Offline </div>
+            <!-- Streaming & Recording Controls -->
             <div class="streaming-controls">
+                <select id="streamSelect">
+                    <!-- populated at runtime with camera names -->
+                </select>
                 <button id="start-stream">Start Live Stream</button>
                 <button id="stop-stream">Stop Stream</button>
                 <button id="save-session">Save Session</button>
-            </div>
-        </div>
+            </div>                  
     </div>
 
-    
     <!-- DJ Decks -->
     <div id="player" class="decks">
         <div class="deck">

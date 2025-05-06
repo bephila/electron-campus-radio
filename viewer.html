@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Live Stream Viewer</title>
+</head>
+<body>
+  <video id="player" controls width="100%">
+    <!-- for native HLS support (Safari) -->
+    <source
+      src="http://YOUR_SERVER:8080/hls/stream.m3u8"
+      type="application/vnd.apple.mpegURL">
+  </video>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script>
+    const video = document.getElementById('player');
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource('http://YOUR_SERVER:8080/hls/stream.m3u8');
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+    } else if (video.canPlayType('application/vnd.apple.mpegURL')) {
+      video.src = 'http://YOUR_SERVER:8080/hls/stream.m3u8';
+      video.addEventListener('loadedmetadata', () => video.play());
+    }
+  </script>
+</body>
+</html>
