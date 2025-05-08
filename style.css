@@ -346,3 +346,11 @@ input[type="file"] {
     background: gray;
     color: white;
 }
+
+#playlist-items tr.playing {
+    background-color: #8b8b8b;  /* or whatever “light‐blue” you like */
+  }
+  
+  #playlist-items tr.playing td {
+    color: black !important;
+  }

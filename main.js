@@ -1,21 +1,22 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 
 let ffmpegProcess;
 const rtmpUrl = "rtmp://localhost/live/stream";
-let mainWindow = null;
+let mainWindow;
 
 app.whenReady().then(() => {
-    mainWindow = new BrowserWindow({
-        width: 1200,
-        height: 800,
-        webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-        },
-    });
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      enableRemoteModule: true   // ← Enable `require('electron').remote`
+    }
+  });
 
-    mainWindow.loadFile("index.html");
+  mainWindow.loadFile("index.html");
 });
 
 ipcMain.handle("get-ffmpeg-devices", async () => {
@@ -120,4 +121,40 @@ ipcMain.on("stop-ffmpeg", () => {
 
 app.on("before-quit", () => {
     if (ffmpegProcess) ffmpegProcess.kill();
+});
+
+ipcMain.on("start-ffmpeg-file", (event, rtmpUrl, filePath) => {
+  if (!filePath) {
+    console.warn("No file path provided for streaming.");
+    mainWindow.webContents.send("stream-error", "No file path provided");
+    return;
+  }
+
+  console.log(`Streaming file via FFmpeg: ${filePath}`);
+  ffmpegProcess = spawn("ffmpeg", [
+    "-re",
+    "-i", filePath,
+    "-c:v", "libx264",
+    "-c:a", "aac",
+    "-f", "flv",
+    rtmpUrl
+  ], { shell: true });
+
+  ffmpegProcess.stdout.on("data", data => {
+    console.log(`FFmpeg stdout: ${data}`);
+  });
+
+  ffmpegProcess.stderr.on("data", data => {
+    console.error(`FFmpeg stderr: ${data}`);
+    mainWindow.webContents.send("stream-error", data.toString());
+  });
+
+  ffmpegProcess.on("close", code => {
+    console.log(`FFmpeg exited with code ${code}`);
+    mainWindow.webContents.send("stream-status", false);
+    ffmpegProcess = null;
+  });
+
+  // immediately tell the UI we’re live
+  mainWindow.webContents.send("stream-status", true);
 });
