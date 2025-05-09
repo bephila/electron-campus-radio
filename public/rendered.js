@@ -782,5 +782,30 @@ window.showSettings = async function(button, settingsId, camId) {
       deckA.dataset.fileName = row.dataset.fileName;
       deckA.play();
     });
-  });  
+  }); 
+  const startBtn = document.getElementById("start-stream");
+  const stopBtn  = document.getElementById("stop-stream");
+  let mediaRecorder;
+  let ws;
+
+  startBtn.addEventListener("click", () => {
+    const liveMonitor = document.getElementById("liveMonitor");
+    const stream = liveMonitor.captureStream(30);
+    ws = new WebSocket("ws://localhost:9999");
+
+    ws.addEventListener("open", () => {
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm; codecs=vp8" });
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+          ws.send(e.data);
+        }
+      };
+      mediaRecorder.start(1000);
+    });
+  });
+
+  stopBtn.addEventListener("click", () => {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+    if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+  });
 });

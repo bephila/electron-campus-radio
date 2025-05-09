@@ -1,15 +1,25 @@
 {
   "name": "electron-campus-radio",
   "version": "1.0.0",
-  "main": "main.js",
+  "description": "Campus radio streaming app built with Electron, WebSocket→FFmpeg bridge, and HLS viewer",
+  "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "serve": "npx serve public -l 8080",
+    "stream": "node src/stream-server.js"
   },
-  "keywords": [],
+  "keywords": [
+    "electron",
+    "hls",
+    "radio",
+    "stream"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "dependencies": {
+    "ws": "^8.13.0",
+    "serve": "^14.2.2"
+  },
   "devDependencies": {
     "electron": "^35.2.2"
   }
