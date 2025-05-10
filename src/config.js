@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 
 // Default paths to check for FFmpeg
 const DEFAULT_PATHS = [
+    path.join(__dirname, '..', 'ffmpeg-7.1.1', 'bin', 'ffmpeg.exe'), // Local project FFmpeg
     'ffmpeg', // Check if ffmpeg is in PATH
     path.join(process.env.USERPROFILE, 'Documents', 'ffmpeg-7.1.1', 'bin', 'ffmpeg.exe'),
     path.join(process.env.ProgramFiles, 'ffmpeg', 'bin', 'ffmpeg.exe'),
@@ -12,7 +13,13 @@ const DEFAULT_PATHS = [
 
 // Try to find FFmpeg in the system
 function findFFmpeg() {
-    // First check if ffmpeg is in PATH
+    // First check local project FFmpeg
+    const localFFmpeg = path.join(__dirname, '..', 'ffmpeg-7.1.1', 'bin', 'ffmpeg.exe');
+    if (fs.existsSync(localFFmpeg)) {
+        return localFFmpeg;
+    }
+
+    // Then check if ffmpeg is in PATH
     try {
         execSync('ffmpeg -version', { stdio: 'ignore' });
         return 'ffmpeg'; // If found in PATH, return just the command name
@@ -48,7 +55,7 @@ function getFFmpegPath() {
     // If no config or invalid config, try to find FFmpeg
     const foundPath = findFFmpeg();
     if (!foundPath) {
-        throw new Error('FFmpeg not found. Please install FFmpeg and add it to your PATH or specify its location in the config.');
+        throw new Error('FFmpeg not found. Please ensure ffmpeg-7.1.1 is present in the project directory.');
     }
 
     return foundPath;

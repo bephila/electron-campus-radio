@@ -5,10 +5,9 @@ A campus radio streaming application built with Electron, WebSocket→FFmpeg bri
 ## Prerequisites
 
 - Node.js (v14 or higher)
-- FFmpeg (must be installed and available in PATH or in Documents folder)
 - A modern web browser (for viewers)
 
-## Installation
+## Quick Start
 
 1. Clone the repository:
 ```bash
@@ -21,27 +20,17 @@ cd electron-campus-radio
 npm install
 ```
 
-## Running the Application
-
-The application consists of three main components that need to be running:
-
-1. **Static Server** (serves the viewer page and HLS segments):
+3. Start the application (in three separate terminals):
 ```bash
+# Terminal 1 - Static Server
 npm run serve
-```
-This starts the static server on port 8080.
 
-2. **Stream Server** (handles WebSocket streaming and FFmpeg conversion):
-```bash
+# Terminal 2 - Stream Server
 npm run stream
-```
-This starts the WebSocket server on port 9999.
 
-3. **Main Application** (the broadcasting interface):
-```bash
+# Terminal 3 - Main Application
 npm start
 ```
-This launches the Electron application for broadcasting.
 
 ## Usage
 
@@ -66,22 +55,11 @@ This launches the Electron application for broadcasting.
    - Adjust volume
    - Toggle fullscreen
 
-## FFmpeg Setup
-
-The application requires FFmpeg to be installed. You can:
-
-1. Install FFmpeg globally and add it to your PATH, or
-2. Place FFmpeg in your Documents folder at:
-   ```
-   C:\Users\[YourUsername]\Documents\ffmpeg-7.1.1\bin\ffmpeg.exe
-   ```
-
 ## Troubleshooting
 
 If you encounter issues:
 
 1. **Stream not starting:**
-   - Check if FFmpeg is properly installed
    - Verify all three components are running
    - Check the console for error messages
 
@@ -102,11 +80,7 @@ If you encounter issues:
 - Static server: `src/static-server.js`
 - Viewer page: `public/viewer.html`
 
-## License
-
-[Your License Here]
-
 ## Contributors
 
-- [Your Name/Team]
+- [Team Name]
 - SLU Internship Project
