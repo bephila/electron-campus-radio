@@ -1,4 +1,123 @@
-const { ipcRenderer } = require("electron");
+// Helper functions
+function updateLiveStatus(status) {
+  const liveStatus = document.getElementById("live-status");
+  if (status) {
+    liveStatus.textContent = "Live";
+    liveStatus.classList.remove("live-off");
+    liveStatus.classList.add("live-on");
+  } else {
+    liveStatus.textContent = "Offline";
+    liveStatus.classList.remove("live-on");
+    liveStatus.classList.add("live-off");
+  }
+}
+
+function confirmAndReplaceLiveMonitor(action) {
+  const lm = document.getElementById("liveMonitor");
+  const hasSomethingPlaying =
+    (lm.srcObject && lm.srcObject.getTracks().length > 0) ||
+    !!lm.currentSrc;
+  if (hasSomethingPlaying && !confirm("There is currently a media playing, would you like to continue?")) return;
+  action();    
+}
+
+// When the user clicks "Go Live" on a camera, show its stream in the live monitor.
+window.goLive = async function(cameraId) {
+  confirmAndReplaceLiveMonitor(async () => {
+    const camEl = document.getElementById(cameraId);
+    const liveMonitor = document.getElementById("liveMonitor");
+    
+    try {
+      // 1) Get the camera stream
+      const deviceId = camEl.dataset.deviceId
+        || (await navigator.mediaDevices
+             .enumerateDevices()
+             .then(list => list.find(d => d.kind==="videoinput").deviceId));
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: deviceId }}, 
+        audio: false
+      });
+
+      // 2) Show the stream in the camera preview
+      camEl.srcObject = stream;
+      camEl.dataset.deviceId = deviceId;
+      camEl.play();
+
+      // 3) Show the same stream in the Live Monitor
+      liveMonitor.srcObject = stream;
+      liveMonitor.play();
+      
+      console.log(`Camera ${cameraId} is now live in monitor.`);
+      updateLiveStatus(true);
+    } catch (error) {
+      console.error('Error starting camera stream:', error);
+      alert('Failed to start camera stream: ' + error.message);
+      updateLiveStatus(false);
+    }
+  });
+};
+
+// Stop a camera stream.
+window.stopLive = function(cameraId) {
+  const videoElement = document.getElementById(cameraId);
+  const liveMonitor = document.getElementById("liveMonitor");
+  
+  if (videoElement.srcObject) {
+    videoElement.srcObject.getTracks().forEach(track => track.stop());
+    videoElement.srcObject = null;
+    videoElement.dataset.ready = "false";
+  }
+  
+  if (liveMonitor.srcObject) {
+    liveMonitor.srcObject.getTracks().forEach(track => track.stop());
+    liveMonitor.srcObject = null;
+    liveMonitor.pause();
+  }
+  
+  window.electronAPI.stopFFmpeg();
+  updateLiveStatus(false);
+  console.log(`Camera ${cameraId} stopped.`);
+};
+
+// Add this function before the DOMContentLoaded event listener
+async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter(device => device.kind === 'videoinput');
+    
+    // Try to find an exact match first
+    const exactMatch = videoInputs.find(device => 
+      device.label === ffmpegDeviceName || 
+      device.label.includes(ffmpegDeviceName)
+    );
+    
+    if (exactMatch) {
+      return exactMatch.deviceId;
+    }
+    
+    // If no exact match, try to find a partial match
+    const partialMatch = videoInputs.find(device => 
+      ffmpegDeviceName.includes(device.label) ||
+      device.label.toLowerCase().includes(ffmpegDeviceName.toLowerCase())
+    );
+    
+    if (partialMatch) {
+      return partialMatch.deviceId;
+    }
+    
+    // If still no match, return the first available video input
+    if (videoInputs.length > 0) {
+      console.warn(`No exact match found for ${ffmpegDeviceName}, using first available camera`);
+      return videoInputs[0].deviceId;
+    }
+    
+    throw new Error('No video input devices found');
+  } catch (error) {
+    console.error('Error getting browser device ID:', error);
+    throw error;
+  }
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
 let playlistFiles = [];
@@ -53,41 +172,6 @@ if (videoInput) {
     console.log('Video selected:', e.target.files);
     updateMediaLibrary(e.target, 'video-library-items', 'video');
   });
-}
-
-function updateLiveStatus(status) {
-  const liveStatus = document.getElementById("live-status");
-  if (status) {
-    liveStatus.textContent = "Live";
-    liveStatus.classList.remove("live-off");
-    liveStatus.classList.add("live-on");
-  } else {
-    liveStatus.textContent = "Offline";
-    liveStatus.classList.remove("live-on");
-    liveStatus.classList.add("live-off");
-  }
-}
-
-function confirmAndReplaceLiveMonitor(action) {
-  const lm = document.getElementById("liveMonitor");
-  const hasSomethingPlaying =
-    (lm.srcObject && lm.srcObject.getTracks().length > 0) ||
-    !!lm.currentSrc;
-    if (hasSomethingPlaying && !confirm("There is currently a media playing, would you like to continue?")) return;
-    action();    
-}
-
-// Map an FFmpeg DirectShow device name to a browser deviceId.
-async function getBrowserDeviceIdForFFmpegName(ffmpegName) {
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const videoDevices = devices.filter(d => d.kind === 'videoinput');
-  const lowerName = ffmpegName.toLowerCase();
-  for (let device of videoDevices) {
-    if (device.label && device.label.toLowerCase().includes(lowerName)) {
-      return device.deviceId;
-    }
-  }
-  return null;
 }
 
 async function populateCameraDevices() {
@@ -173,48 +257,6 @@ async function updateCameraPreview(camId, deviceId) {
   }
 }
 
-// When the user clicks "Go Live" on a camera, show its stream in the live monitor.
-window.goLive = async function(cameraId) {
-  confirmAndReplaceLiveMonitor(async () => {
-    const camEl = document.getElementById(cameraId);
-    // 1) Ensure camEl.srcObject is streaming a MediaStream
-    if (!camEl.srcObject) {
-      const deviceId = camEl.dataset.deviceId
-        || (await navigator.mediaDevices
-             .enumerateDevices()
-             .then(list => list.find(d => d.kind==="videoinput").deviceId));
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: deviceId }}, 
-        audio: false
-      });
-      camEl.srcObject = stream;
-      camEl.dataset.deviceId = deviceId;
-      camEl.play();
-    }
-
-    // 2) Now switch the live monitor over to that stream
-    showCameraStream(camEl.srcObject);
-    console.log(`Camera ${cameraId} is now live.`);
-  });
-};
-
-
-// Stop a camera stream.
-window.stopLive = function(cameraId) {
-  const videoElement = document.getElementById(cameraId);
-  const liveMonitor = document.getElementById("liveMonitor");
-  if (videoElement.srcObject) {
-    videoElement.srcObject.getTracks().forEach(track => track.stop());
-    videoElement.srcObject = null;
-    videoElement.dataset.ready = "false";
-  }
-  if (liveMonitor.srcObject === videoElement.srcObject) {
-    liveMonitor.srcObject = null;
-    liveMonitor.pause();
-  }
-  console.log(`Camera ${cameraId} stopped.`);
-};
-
 // Show the settings dropdown for selecting a camera for a preview.
 window.showSettings = async function(button, settingsId, camId) {
   const videoElement = document.getElementById(camId);
@@ -222,61 +264,78 @@ window.showSettings = async function(button, settingsId, camId) {
     console.error(`Video element with id "${camId}" not found.`);
     return;
   }
-  let availableDevices = [];
+
   try {
-    availableDevices = JSON.parse(videoElement.dataset.availableDevices || '[]');
-  } catch (error) {
-    console.error("Error parsing availableDevices for", camId, error);
-    return;
-  }
-  if (!Array.isArray(availableDevices) || availableDevices.length === 0) {
-    alert("No camera devices found!");
-    return;
-  }
-  let existingMenu = document.getElementById(settingsId);
-  if (existingMenu) {
-    existingMenu.remove();
-    return;
-  }
-  let settingsDiv = document.createElement("div");
-  settingsDiv.id = settingsId;
-  settingsDiv.className = "settings-menu";
-  const select = document.createElement("select");
-  select.classList.add("camera-select");
-  availableDevices.forEach((device, index) => {
-    const option = document.createElement("option");
-    option.value = device.deviceId;
-    option.textContent = device.label || `Camera ${index + 1}`;
-    select.appendChild(option);
-  });
-  if (videoElement.dataset.deviceId) {
-    select.value = videoElement.dataset.deviceId;
-  }
-  select.addEventListener("change", (event) => {
-    const selectedDevice = event.target.value;
-    videoElement.dataset.deviceId = selectedDevice;
-    console.log(`Selected device for ${camId}: ${selectedDevice}`);
-    updateCameraPreview(camId, selectedDevice);
-    settingsDiv.remove();
-  });
-  settingsDiv.appendChild(select);
-  document.body.appendChild(settingsDiv);
-  const buttonRect = button.getBoundingClientRect();
-  settingsDiv.style.position = "absolute";
-  settingsDiv.style.left = `${buttonRect.left}px`;
-  settingsDiv.style.top = `${buttonRect.bottom}px`;
-  settingsDiv.style.zIndex = 9999;
-  document.addEventListener('click', function handleOutsideClick(e) {
-    if (!settingsDiv.contains(e.target) && e.target !== button) {
-      settingsDiv.remove();
-      document.removeEventListener('click', handleOutsideClick);
+    // Get FFmpeg devices
+    const ffmpegDevices = await window.electronAPI.getFFmpegDevices();
+    console.log("FFmpeg devices:", ffmpegDevices);
+
+    if (!Array.isArray(ffmpegDevices) || ffmpegDevices.length === 0) {
+      alert("No camera devices found!");
+      return;
     }
-  });
+
+    let existingMenu = document.getElementById(settingsId);
+    if (existingMenu) {
+      existingMenu.remove();
+      return;
+    }
+
+    let settingsDiv = document.createElement("div");
+    settingsDiv.id = settingsId;
+    settingsDiv.className = "settings-menu";
+    const select = document.createElement("select");
+    select.classList.add("camera-select");
+
+    ffmpegDevices.forEach((device) => {
+      const option = document.createElement("option");
+      option.value = device.name;
+      option.textContent = device.name;
+      select.appendChild(option);
+    });
+
+    if (videoElement.dataset.deviceName) {
+      select.value = videoElement.dataset.deviceName;
+    }
+
+    select.addEventListener("change", async (event) => {
+      const selectedDevice = event.target.value;
+      videoElement.dataset.deviceName = selectedDevice;
+      console.log(`Selected device for ${camId}: ${selectedDevice}`);
+      
+      // Get browser device ID for the selected FFmpeg device
+      const browserDeviceId = await getBrowserDeviceIdForFFmpegName(selectedDevice);
+      if (browserDeviceId) {
+        videoElement.dataset.deviceId = browserDeviceId;
+        await updateCameraPreview(camId, browserDeviceId);
+      }
+      
+      settingsDiv.remove();
+    });
+
+    settingsDiv.appendChild(select);
+    document.body.appendChild(settingsDiv);
+    const buttonRect = button.getBoundingClientRect();
+    settingsDiv.style.position = "absolute";
+    settingsDiv.style.left = `${buttonRect.left}px`;
+    settingsDiv.style.top = `${buttonRect.bottom}px`;
+    settingsDiv.style.zIndex = 9999;
+
+    document.addEventListener('click', function handleOutsideClick(e) {
+      if (!settingsDiv.contains(e.target) && e.target !== button) {
+        settingsDiv.remove();
+        document.removeEventListener('click', handleOutsideClick);
+      }
+    });
+  } catch (error) {
+    console.error("Error in showSettings:", error);
+    alert("Error loading camera settings: " + error.message);
+  }
 };
 
 // Bruce 
   try {
-    const ffmpegDevices = await ipcRenderer.invoke("get-ffmpeg-devices");
+    const ffmpegDevices = await window.electronAPI.getFFmpegDevices();
     console.log("DirectShow devices from FFmpeg:", ffmpegDevices);
     const streamSelect = document.getElementById("streamSelect");
     if (streamSelect) {
@@ -299,7 +358,7 @@ window.showSettings = async function(button, settingsId, camId) {
         await updateCameraPreview("liveMonitor", browserDeviceId);
         const rtmpUrl = "rtmp://localhost/live/stream";
         console.log("Starting FFmpeg stream with:", rtmpUrl, ffmpegDeviceName);
-        ipcRenderer.send("start-ffmpeg", rtmpUrl, ffmpegDeviceName);
+        window.electronAPI.startFFmpeg(rtmpUrl, ffmpegDeviceName);
       });
     }
   } catch (err) {
@@ -488,44 +547,134 @@ window.showSettings = async function(button, settingsId, camId) {
     return null;
   }        
 
-  document.getElementById("start-stream").addEventListener("click", async () => {
-    if (isStreaming) {
-      console.warn("Streaming is already active.");
-      return;
-    }
-  
-    const camId = getActiveCamera();
-    const lm = document.getElementById("liveMonitor");
-  
-    if (camId) {
-      // Streaming a live camera
-      console.log(`Starting stream from camera: ${camId}`);
-      ipcRenderer.send("start-ffmpeg", rtmpUrl, camId);
-  
-    } else if (lm.currentSrc) {
-      // Streaming a loaded video file
-      console.log(`Starting stream from file URL: ${lm.currentSrc}`);
-      ipcRenderer.send("start-ffmpeg-file", rtmpUrl, lm.currentSrc);
-  
-    } else {
-      alert("No active source. Please start a camera or play a video first.");
-      return;
-    }
-  
-    isStreaming = true;
-    updateLiveStatus(true);
-  });        
+  const startBtn = document.getElementById("start-stream");
+  const stopBtn = document.getElementById("stop-stream");
+  let mediaRecorder;
+  let ws;
 
-  document.getElementById("stop-stream").addEventListener("click", () => {
-      if (!isStreaming) return;
-      ipcRenderer.send("stop-ffmpeg");
-      isStreaming = false;
+  // Helper function to get supported MIME type
+  function getSupportedMimeType() {
+    const types = [
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=h264,opus',
+      'video/webm',
+      'video/mp4'
+    ];
+    
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        console.log('Using MIME type:', type);
+        return type;
+      }
+    }
+    return null;
+  }
+
+  startBtn.addEventListener("click", async () => {
+    try {
+      const liveMonitor = document.getElementById("liveMonitor");
+      if (!liveMonitor.srcObject && !liveMonitor.src) {
+        alert("No content in Live Monitor! Please add some content first.");
+        return;
+      }
+
+      // Start FFmpeg stream
+      const rtmpUrl = "rtmp://localhost/live/stream";
+      console.log("Starting stream with content from Live Monitor");
+      
+      // Start WebSocket streaming
+      try {
+        // Check if captureStream is supported
+        if (!liveMonitor.captureStream) {
+          console.warn("captureStream not supported in this browser");
+          return;
+        }
+
+        const stream = liveMonitor.captureStream(30);
+        const mimeType = getSupportedMimeType();
+        
+        if (!mimeType) {
+          console.warn("No supported MIME types found for MediaRecorder");
+          return;
+        }
+
+        ws = new WebSocket("ws://localhost:9999");
+        
+        ws.addEventListener("open", () => {
+          try {
+            mediaRecorder = new MediaRecorder(stream, { 
+              mimeType: mimeType,
+              videoBitsPerSecond: 2500000,
+              audioBitsPerSecond: 192000
+            });
+            
+            mediaRecorder.ondataavailable = e => {
+              if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                try {
+                  ws.send(e.data);
+                } catch (error) {
+                  console.error('Error sending data to WebSocket:', error);
+                }
+              }
+            };
+
+            mediaRecorder.onerror = (event) => {
+              console.error('MediaRecorder error:', event);
+              alert('MediaRecorder error: ' + event.error);
+            };
+            
+            mediaRecorder.start(1000);
+            console.log("MediaRecorder started successfully with mimeType:", mimeType);
+            updateLiveStatus(true);
+          } catch (error) {
+            console.error('Error starting MediaRecorder:', error);
+            alert('Failed to start MediaRecorder: ' + error.message);
+          }
+        });
+
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          alert('WebSocket error: ' + error.message);
+        };
+      } catch (error) {
+        console.warn("WebSocket streaming not available:", error);
+        alert('WebSocket streaming not available: ' + error.message);
+      }
+
+    } catch (error) {
+      console.error("Error starting stream:", error);
+      alert("Failed to start stream: " + error.message);
       updateLiveStatus(false);
-      console.log("Streaming stopped.");
+    }
   });
 
-  ipcRenderer.on("stream-status", (event, status) => {
-      updateLiveStatus(status);
+  stopBtn.addEventListener("click", () => {
+    try {
+      // Stop MediaRecorder if active
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        try {
+          mediaRecorder.stop();
+        } catch (error) {
+          console.error('Error stopping MediaRecorder:', error);
+        }
+        mediaRecorder = null;
+      }
+
+      // Close WebSocket if open
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.close();
+        } catch (error) {
+          console.error('Error closing WebSocket:', error);
+        }
+        ws = null;
+      }
+
+      updateLiveStatus(false);
+    } catch (error) {
+      console.error("Error stopping stream:", error);
+    }
   });
 
   document.getElementById("fadeButton").addEventListener("click", function () {
@@ -626,7 +775,7 @@ window.showSettings = async function(button, settingsId, camId) {
         addToPlaylist(item);          // your existing helper
       });
     
-      // restore “now playing”
+      // restore "now playing"
       if (session.nowPlayingIndex >= 0) {
         highlightRow(session.nowPlayingIndex);
         const deckA = document.getElementById('deckA');
@@ -783,29 +932,14 @@ window.showSettings = async function(button, settingsId, camId) {
       deckA.play();
     });
   }); 
-  const startBtn = document.getElementById("start-stream");
-  const stopBtn  = document.getElementById("stop-stream");
-  let mediaRecorder;
-  let ws;
 
-  startBtn.addEventListener("click", () => {
-    const liveMonitor = document.getElementById("liveMonitor");
-    const stream = liveMonitor.captureStream(30);
-    ws = new WebSocket("ws://localhost:9999");
+  // Add status handlers
+  window.onStreamStatus = (status) => {
+    updateLiveStatus(status);
+  };
 
-    ws.addEventListener("open", () => {
-      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm; codecs=vp8" });
-      mediaRecorder.ondataavailable = e => {
-        if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          ws.send(e.data);
-        }
-      };
-      mediaRecorder.start(1000);
-    });
-  });
-
-  stopBtn.addEventListener("click", () => {
-    if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
-    if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-  });
+  window.onStreamError = (error) => {
+    console.error('Stream error:', error);
+    alert('Stream error: ' + error);
+  };
 });

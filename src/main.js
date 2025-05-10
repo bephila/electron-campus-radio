@@ -1,7 +1,9 @@
 // src/main.js
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
+const fs = require('fs');
+const { getFFmpegPath, saveFFmpegPath } = require('./config');
 
 let ffmpegProcess;
 let mainWindow;
@@ -12,73 +14,80 @@ function createWindow() {
     height: 800,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', 'public', 'index.html'));
+  mainWindow.webContents.openDevTools();
 }
 
-// once Electron is ready, make the window
 app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
 
 // gracefully kill ffmpeg on quit
 app.on('before-quit', () => {
   if (ffmpegProcess) ffmpegProcess.kill();
 });
 
-
-// — ipcMain handlers —
-
-// 1) list dshow video devices
-ipcMain.handle('get-ffmpeg-devices', async () => {
-  return new Promise((resolve) => {
-    exec('ffmpeg -list_devices true -f dshow -i dummy', (err, stdout, stderr) => {
-      const deviceLines = stderr
-        .split('\n')
-        .filter(l => l.toLowerCase().includes('dshow') && l.includes('"') && !l.toLowerCase().includes('audio'));
-
-      const devices = deviceLines
-        .map(l => l.match(/"([^"]+)"/)?.[1]?.split('@')[0].trim())
-        .filter(Boolean);
-
-      resolve(devices);
-    });
-  });
-});
-
-// 2) start streaming from camera
-ipcMain.on('start-ffmpeg', (_, rtmpUrl, cameraName) => {
+// IPC Handlers
+ipcMain.on('start-ffmpeg', async (_, rtmpUrl, cameraName) => {
   if (!cameraName) {
     mainWindow.webContents.send('stream-error', 'No camera selected');
     return;
   }
 
-  ffmpegProcess = spawn('ffmpeg', [
-    '-f', 'dshow',
-    '-i', `video="${cameraName}"`,
-    '-vcodec', 'libx264',
-    '-preset', 'ultrafast',
-    '-tune', 'zerolatency',
-    '-b:v', '2500k',
-    '-maxrate', '2500k',
-    '-bufsize', '5000k',
-    '-pix_fmt', 'yuv420p',
-    '-g', '60',
-    '-sc_threshold', '0',
-    '-f', 'flv',
-    rtmpUrl
-  ], { shell: true });
+  try {
+    const ffmpegPath = getFFmpegPath();
+    
+    // Get the list of available devices
+    const devices = await ipcMain.invoke('get-ffmpeg-devices');
+    const selectedDevice = devices.find(d => d.name === cameraName);
+    
+    if (!selectedDevice) {
+      mainWindow.webContents.send('stream-error', `Camera "${cameraName}" not found in FFmpeg devices`);
+      return;
+    }
 
-  ffmpegProcess.stderr.on('data', d => {
-    mainWindow.webContents.send('stream-error', d.toString());
-  });
+    ffmpegProcess = spawn(ffmpegPath, [
+      '-f', 'dshow',
+      '-i', `video="${selectedDevice.fullName}"`,
+      '-vcodec', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
+      '-b:v', '2500k',
+      '-maxrate', '2500k',
+      '-bufsize', '5000k',
+      '-pix_fmt', 'yuv420p',
+      '-g', '60',
+      '-sc_threshold', '0',
+      '-f', 'flv',
+      rtmpUrl
+    ], { shell: true });
 
-  mainWindow.webContents.send('stream-status', true);
+    ffmpegProcess.stderr.on('data', d => {
+      mainWindow.webContents.send('stream-error', d.toString());
+    });
+
+    mainWindow.webContents.send('stream-status', true);
+  } catch (error) {
+    mainWindow.webContents.send('stream-error', error.message);
+  }
 });
 
-// 3) stop streaming
 ipcMain.on('stop-ffmpeg', () => {
   if (ffmpegProcess) {
     ffmpegProcess.kill();
@@ -87,30 +96,59 @@ ipcMain.on('stop-ffmpeg', () => {
   }
 });
 
-// 4) stream a file
-ipcMain.on('start-ffmpeg-file', (_, rtmpUrl, filePath) => {
-  if (!filePath) {
-    mainWindow.webContents.send('stream-error', 'No file path provided');
-    return;
+ipcMain.handle('get-ffmpeg-devices', async () => {
+  return new Promise((resolve) => {
+    exec(`${getFFmpegPath()} -list_devices true -f dshow -i dummy`, (err, stdout, stderr) => {
+      const deviceLines = stderr
+        .split('\n')
+        .filter(l => l.toLowerCase().includes('dshow') && l.includes('"') && !l.toLowerCase().includes('audio'));
+
+      const devices = deviceLines
+        .map(l => {
+          const match = l.match(/"([^"]+)"/);
+          if (match) {
+            const fullName = match[1];
+            // Extract just the camera name without the @ symbol and any additional info
+            const name = fullName.split('@')[0].trim();
+            return {
+              name: name,
+              fullName: fullName
+            };
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      resolve(devices);
+    });
+  });
+});
+
+// Add new IPC handler for FFmpeg path configuration
+ipcMain.handle('get-ffmpeg-path', async () => {
+  try {
+    return getFFmpegPath();
+  } catch (error) {
+    return null;
+  }
+});
+
+ipcMain.handle('set-ffmpeg-path', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Select FFmpeg executable',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Executable', extensions: ['exe'] }
+    ]
+  });
+
+  if (canceled || !filePaths.length) {
+    return false;
   }
 
-  ffmpegProcess = spawn('ffmpeg', [
-    '-re',
-    '-i', filePath,
-    '-c:v', 'libx264',
-    '-c:a', 'aac',
-    '-f', 'flv',
-    rtmpUrl
-  ], { shell: true });
-
-  ffmpegProcess.stderr.on('data', d => {
-    mainWindow.webContents.send('stream-error', d.toString());
-  });
-
-  ffmpegProcess.on('close', code => {
-    mainWindow.webContents.send('stream-status', false);
-    ffmpegProcess = null;
-  });
-
-  mainWindow.webContents.send('stream-status', true);
+  const selectedPath = filePaths[0];
+  if (saveFFmpegPath(selectedPath)) {
+    return selectedPath;
+  }
+  return false;
 });

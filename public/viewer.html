@@ -1,29 +1,150 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Live Stream Viewer</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="rendered.js"></script>
+    <meta charset="UTF-8">
+    <title>Campus Radio Live Stream</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #121212;
+            color: white;
+            font-family: sans-serif;
+        }
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        #player {
+            width: 100%;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .status {
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        #playButton {
+            background: #ff5500;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #playButton:hover {
+            background: #ff7700;
+        }
+        #playButton.hidden {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <video id="player" controls width="100%">
-    <source
-      src="http://localhost:8080/hls/stream.m3u8"
-      type="application/vnd.apple.mpegURL">
-  </video>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <script>
-    const video = document.getElementById("player");
-    if (Hls.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource("http://localhost:8080/hls/stream.m3u8");
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-    } else if (video.canPlayType("application/vnd.apple.mpegURL")) {
-      video.src = "http://localhost:8080/hls/stream.m3u8";
-      video.addEventListener("loadedmetadata", () => video.play());
-    }
-  </script>  
+    <div class="container">
+        <div class="status">Waiting for stream...</div>
+        <video id="player" controls playsinline muted></video>
+        <div class="controls">
+            <button id="playButton" disabled>Start Watching</button>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        const video = document.getElementById("player");
+        const status = document.querySelector(".status");
+        const playButton = document.getElementById("playButton");
+        const hlsUrl = "http://localhost:8080/hls/stream.m3u8";
+        let hls = null;
+        let isInitializing = false;
+
+        function initializeStream() {
+            if (isInitializing) return;
+            isInitializing = true;
+
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
+
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    manifestLoadingTimeOut: 10000,
+                    manifestLoadingMaxRetry: 1
+                });
+
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    isInitializing = false;
+                    status.textContent = "Stream ready - click to play";
+                    playButton.disabled = false;
+                    
+                    // Try autoplay muted
+                    video.muted = true;
+                    video.play()
+                        .then(() => {
+                            status.textContent = "Stream playing (muted)";
+                            playButton.textContent = "Unmute";
+                        })
+                        .catch(() => {
+                            status.textContent = "Click to play";
+                        });
+                });
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) {
+                        isInitializing = false;
+                        status.textContent = "Stream not available";
+                        playButton.disabled = true;
+                        
+                        setTimeout(() => {
+                            initializeStream();
+                        }, 5000);
+                    }
+                });
+            }
+        }
+
+        // Handle play button click
+        playButton.addEventListener('click', () => {
+            if (video.muted) {
+                video.muted = false;
+                status.textContent = "Stream playing";
+                playButton.style.display = 'none';
+                return;
+            }
+
+            video.play()
+                .then(() => {
+                    status.textContent = "Stream playing";
+                    playButton.style.display = 'none';
+                })
+                .catch(error => {
+                    console.error('Playback failed:', error);
+                    // If play fails, try muted
+                    video.muted = true;
+                    video.play()
+                        .then(() => {
+                            status.textContent = "Stream playing (muted)";
+                            playButton.textContent = "Unmute";
+                        })
+                        .catch(() => {
+                            status.textContent = "Playback failed. Click to try again.";
+                        });
+                });
+        });
+
+        // Start streaming
+        initializeStream();
+    </script>
 </body>
 </html>

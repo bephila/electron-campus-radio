@@ -6,6 +6,7 @@
     <title>Cheers</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/boxicons@2.1.4/dist/boxicons.js"></script>
+    <script src="rendered.js" defer></script>
 </head>
 <body>
     <h1>Cheers Campus Radio</h1>
@@ -78,9 +79,6 @@
         <div id="live-status" class="live-off"> Offline </div>
             <!-- Streaming & Recording Controls -->
             <div class="streaming-controls">
-                <select id="streamSelect">
-                    <!-- populated at runtime with camera names -->
-                </select>
                 <button id="start-stream">Start Live Stream</button>
                 <button id="stop-stream">Stop Stream</button>
                 <button id="save-session">Save Session</button>
@@ -164,6 +162,5 @@
             </table>
         </div>
     </div>
-    <script src="rendered.js"></script>
 </body>
 </html>
