@@ -74,9 +74,9 @@ wss.on('connection', ws => {
       '-preset', 'ultrafast',  // Fast encoding
       '-tune', 'zerolatency', // Reduce latency
       '-f', 'hls',            // HLS output
-      '-hls_time', '2',       // Segment duration
-      '-hls_list_size', '3',  // Keep 3 segments
-      '-hls_flags', 'delete_segments+append_list',
+      '-hls_time', '1',       // Reduced segment duration to 1 second
+      '-hls_list_size', '5',  // Keep 5 segments
+      '-hls_flags', 'delete_segments+append_list+independent_segments',
       '-hls_segment_filename', segmentPath,
       outputPath
     ]);

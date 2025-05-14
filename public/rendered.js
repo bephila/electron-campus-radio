@@ -17,12 +17,27 @@ function confirmAndReplaceLiveMonitor(action) {
   const hasSomethingPlaying =
     (lm.srcObject && lm.srcObject.getTracks().length > 0) ||
     !!lm.currentSrc;
-  if (hasSomethingPlaying && !confirm("There is currently a media playing, would you like to continue?")) return;
+  
+  // If there's a live stream, don't show confirmation
+  if (hasSomethingPlaying && lm.srcObject && lm.srcObject.getTracks().length > 0) {
+    // If it's a live camera stream, just execute the action
+    action();
+    return;
+  }
+  
+  // For other media (videos, audio), show confirmation
+  if (hasSomethingPlaying && !confirm("There is currently a media playing, would you like to continue?")) {
+    return;
+  }
   action();    
 }
 
 // When the user clicks "Go Live" on a camera, show its stream in the live monitor.
 window.goLive = async function(cameraId) {
+  if (!confirm(`Do you want to add camera ${cameraId} to the live monitor feed?`)) {
+    return;
+  }
+
   confirmAndReplaceLiveMonitor(async () => {
     const camEl = document.getElementById(cameraId);
     const liveMonitor = document.getElementById("liveMonitor");
@@ -49,11 +64,10 @@ window.goLive = async function(cameraId) {
       liveMonitor.play();
       
       console.log(`Camera ${cameraId} is now live in monitor.`);
-      updateLiveStatus(true);
+      // Don't update live status here - only when actually streaming
     } catch (error) {
       console.error('Error starting camera stream:', error);
       alert('Failed to start camera stream: ' + error.message);
-      updateLiveStatus(false);
     }
   });
 };
@@ -266,11 +280,11 @@ window.showSettings = async function(button, settingsId, camId) {
   }
 
   try {
-    // Get FFmpeg devices
-    const ffmpegDevices = await window.electronAPI.getFFmpegDevices();
-    console.log("FFmpeg devices:", ffmpegDevices);
-
-    if (!Array.isArray(ffmpegDevices) || ffmpegDevices.length === 0) {
+    // Get physical cameras using MediaDevices API
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter(device => device.kind === 'videoinput');
+    
+    if (videoInputs.length === 0) {
       alert("No camera devices found!");
       return;
     }
@@ -287,29 +301,61 @@ window.showSettings = async function(button, settingsId, camId) {
     const select = document.createElement("select");
     select.classList.add("camera-select");
 
-    ffmpegDevices.forEach((device) => {
+    // Add a default "Select Camera" option
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = "Select Camera";
+    select.appendChild(defaultOption);
+
+    // Add all available physical cameras
+    videoInputs.forEach((device, index) => {
       const option = document.createElement("option");
-      option.value = device.name;
-      option.textContent = device.name;
+      option.value = device.deviceId;
+      // Use device label if available, otherwise use a generic name
+      option.textContent = device.label || `Camera ${index + 1}`;
       select.appendChild(option);
     });
 
-    if (videoElement.dataset.deviceName) {
-      select.value = videoElement.dataset.deviceName;
+    // Set current selection if any
+    if (videoElement.dataset.deviceId) {
+      select.value = videoElement.dataset.deviceId;
     }
 
     select.addEventListener("change", async (event) => {
-      const selectedDevice = event.target.value;
-      videoElement.dataset.deviceName = selectedDevice;
-      console.log(`Selected device for ${camId}: ${selectedDevice}`);
-      
-      // Get browser device ID for the selected FFmpeg device
-      const browserDeviceId = await getBrowserDeviceIdForFFmpegName(selectedDevice);
-      if (browserDeviceId) {
-        videoElement.dataset.deviceId = browserDeviceId;
-        await updateCameraPreview(camId, browserDeviceId);
+      const selectedDeviceId = event.target.value;
+      if (!selectedDeviceId) {
+        // If "Select Camera" is chosen, stop the current stream
+        if (videoElement.srcObject) {
+          videoElement.srcObject.getTracks().forEach(track => track.stop());
+          videoElement.srcObject = null;
+        }
+        settingsDiv.remove();
+        return;
       }
-      
+
+      try {
+        // Stop any existing stream
+        if (videoElement.srcObject) {
+          videoElement.srcObject.getTracks().forEach(track => track.stop());
+        }
+
+        // Get stream from selected camera
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: selectedDeviceId } },
+          audio: false
+        });
+
+        // Update video element
+        videoElement.srcObject = stream;
+        videoElement.dataset.deviceId = selectedDeviceId;
+        videoElement.play();
+
+        console.log(`Camera ${camId} updated with device: ${selectedDeviceId}`);
+      } catch (error) {
+        console.error(`Error setting up camera for ${camId}:`, error);
+        alert(`Failed to set up camera: ${error.message}`);
+      }
+
       settingsDiv.remove();
     });
 
@@ -320,6 +366,19 @@ window.showSettings = async function(button, settingsId, camId) {
     settingsDiv.style.left = `${buttonRect.left}px`;
     settingsDiv.style.top = `${buttonRect.bottom}px`;
     settingsDiv.style.zIndex = 9999;
+
+    // Add some basic styling to the settings menu
+    settingsDiv.style.backgroundColor = "#333";
+    settingsDiv.style.padding = "10px";
+    settingsDiv.style.borderRadius = "5px";
+    settingsDiv.style.boxShadow = "0 2px 10px rgba(0,0,0,0.2)";
+    
+    select.style.width = "200px";
+    select.style.padding = "5px";
+    select.style.backgroundColor = "#444";
+    select.style.color = "white";
+    select.style.border = "1px solid #555";
+    select.style.borderRadius = "3px";
 
     document.addEventListener('click', function handleOutsideClick(e) {
       if (!settingsDiv.contains(e.target) && e.target !== button) {
@@ -572,6 +631,10 @@ window.showSettings = async function(button, settingsId, camId) {
   }
 
   startBtn.addEventListener("click", async () => {
+    if (!confirm("Are you sure you want to start live streaming? This will begin broadcasting the current live monitor feed.")) {
+      return;
+    }
+
     try {
       const liveMonitor = document.getElementById("liveMonitor");
       if (!liveMonitor.srcObject && !liveMonitor.src) {
@@ -622,24 +685,28 @@ window.showSettings = async function(button, settingsId, camId) {
             mediaRecorder.onerror = (event) => {
               console.error('MediaRecorder error:', event);
               alert('MediaRecorder error: ' + event.error);
+              updateLiveStatus(false);
             };
             
-            mediaRecorder.start(1000);
+            mediaRecorder.start(500);
             console.log("MediaRecorder started successfully with mimeType:", mimeType);
-            updateLiveStatus(true);
+            updateLiveStatus(true); // Only update live status when actually streaming
           } catch (error) {
             console.error('Error starting MediaRecorder:', error);
             alert('Failed to start MediaRecorder: ' + error.message);
+            updateLiveStatus(false);
           }
         });
 
         ws.onerror = (error) => {
           console.error('WebSocket error:', error);
           alert('WebSocket error: ' + error.message);
+          updateLiveStatus(false);
         };
       } catch (error) {
         console.warn("WebSocket streaming not available:", error);
         alert('WebSocket streaming not available: ' + error.message);
+        updateLiveStatus(false);
       }
 
     } catch (error) {
@@ -650,6 +717,10 @@ window.showSettings = async function(button, settingsId, camId) {
   });
 
   stopBtn.addEventListener("click", () => {
+    if (!confirm("Are you sure you want to stop the live stream?")) {
+      return;
+    }
+
     try {
       // Stop MediaRecorder if active
       if (mediaRecorder && mediaRecorder.state !== "inactive") {
@@ -813,10 +884,17 @@ window.showSettings = async function(button, settingsId, camId) {
       };
       deckA.src = fileData.fileUrl;
       deckA.dataset.fileType = fileData.fileType;
+      
+      // Set audio properties
+      if (fileData.fileType === "audio") {
+        deckA.muted = false;
+      } else if (fileData.fileType === "video") {
+        deckA.muted = true;
+      }
+      
       deckA.play();
       highlightRow(0);
     }
-    // queue deckB as before (you can highlight that too if you like)
   }
 
   function loadToDeck(fileData) {
@@ -837,9 +915,17 @@ window.showSettings = async function(button, settingsId, camId) {
   function loadDeckA(idx) {
     if (idx < 0 || idx >= playlistFiles.length) return;
     const fd = playlistFiles[idx];
-    deckA.src               = fd.fileUrl;
-    deckA.dataset.fileType  = fd.fileType;
-    deckA.dataset.fileName  = fd.fileName;
+    deckA.src = fd.fileUrl;
+    deckA.dataset.fileType = fd.fileType;
+    deckA.dataset.fileName = fd.fileName;
+    
+    // Set audio properties
+    if (fd.fileType === "audio") {
+      deckA.muted = false;
+    } else if (fd.fileType === "video") {
+      deckA.muted = true;
+    }
+    
     deckA.play();
     highlightRow(idx);
   }
@@ -913,24 +999,43 @@ window.showSettings = async function(button, settingsId, camId) {
   .getElementById("playlist-items")
   .addEventListener("click", function(event) {
     const row = event.target.closest("tr");
-    if (!row || row.dataset.fileType !== "video") return;
+    if (!row) return;
 
-    confirmAndReplaceLiveMonitor(() => {
-      const liveMonitor = document.getElementById("liveMonitor");
-      liveMonitor.pause();
-      if (liveMonitor.srcObject) {
-        liveMonitor.srcObject.getTracks().forEach(t => t.stop());
-        liveMonitor.srcObject = null;
-      }
+    const fileType = row.dataset.fileType;
+    const fileUrl = row.dataset.fileUrl;
 
-      showFile(row.dataset.fileUrl);
+    if (fileType === "video") {
+      confirmAndReplaceLiveMonitor(() => {
+        const liveMonitor = document.getElementById("liveMonitor");
+        liveMonitor.pause();
+        if (liveMonitor.srcObject) {
+          liveMonitor.srcObject.getTracks().forEach(t => t.stop());
+          liveMonitor.srcObject = null;
+        }
 
+        showFile(fileUrl);
+
+        const deckA = document.getElementById("deckA");
+        deckA.src = fileUrl;
+        deckA.dataset.fileType = fileType;
+        deckA.dataset.fileName = row.dataset.fileName;
+        deckA.play();
+      });
+    } else if (fileType === "audio") {
+      // Handle audio files
       const deckA = document.getElementById("deckA");
-      deckA.src = row.dataset.fileUrl;
-      deckA.dataset.fileType = row.dataset.fileType;
+      deckA.src = fileUrl;
+      deckA.dataset.fileType = fileType;
       deckA.dataset.fileName = row.dataset.fileName;
+      deckA.muted = false; // Ensure audio is not muted
       deckA.play();
-    });
+      
+      // Highlight the playing row
+      document.querySelectorAll('#playlist-items tr').forEach(r => 
+        r.classList.remove('playing')
+      );
+      row.classList.add('playing');
+    }
   }); 
 
   // Add status handlers

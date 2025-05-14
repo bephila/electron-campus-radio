@@ -92,9 +92,9 @@ ipcMain.on('start-ffmpeg', async (_, rtmpUrl, cameraName) => {
       '-tune', 'zerolatency',
       '-b:v', '2500k',
       '-maxrate', '2500k',
-      '-bufsize', '5000k',
+      '-bufsize', '1000k',
       '-pix_fmt', 'yuv420p',
-      '-g', '60',
+      '-g', '15',
       '-sc_threshold', '0',
       '-f', 'flv',
       rtmpUrl
