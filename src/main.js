@@ -16,12 +16,34 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      enableRemoteModule: false
+      enableRemoteModule: false,
+      sandbox: true,
+      worldSafeExecuteJavaScript: true
     }
   });
 
+  // Load the index.html file
   mainWindow.loadFile(path.join(__dirname, '..', 'public', 'index.html'));
+
+  // Open DevTools
   mainWindow.webContents.openDevTools();
+
+  // Log when the window is ready
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('Main window loaded');
+    // Verify that electronAPI is available
+    mainWindow.webContents.executeJavaScript(`
+      console.log('Checking electronAPI availability:', window.electronAPI ? 'Available' : 'Not available');
+      if (window.electronAPI) {
+        console.log('Available methods:', Object.keys(window.electronAPI));
+      }
+    `);
+  });
+
+  // Log any console messages from the renderer
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`Renderer Console [${level}]: ${message}`);
+  });
 }
 
 app.whenReady().then(createWindow);
@@ -97,31 +119,51 @@ ipcMain.on('stop-ffmpeg', () => {
 });
 
 ipcMain.handle('get-ffmpeg-devices', async () => {
-  return new Promise((resolve) => {
-    exec(`${getFFmpegPath()} -list_devices true -f dshow -i dummy`, (err, stdout, stderr) => {
-      const deviceLines = stderr
-        .split('\n')
-        .filter(l => l.toLowerCase().includes('dshow') && l.includes('"') && !l.toLowerCase().includes('audio'));
+  try {
+    const ffmpegPath = getFFmpegPath();
+    if (!ffmpegPath) {
+      throw new Error('FFmpeg path not found');
+    }
 
-      const devices = deviceLines
-        .map(l => {
-          const match = l.match(/"([^"]+)"/);
-          if (match) {
-            const fullName = match[1];
-            // Extract just the camera name without the @ symbol and any additional info
-            const name = fullName.split('@')[0].trim();
-            return {
-              name: name,
-              fullName: fullName
-            };
-          }
-          return null;
-        })
-        .filter(Boolean);
+    return new Promise((resolve, reject) => {
+      exec(`${ffmpegPath} -list_devices true -f dshow -i dummy`, (err, stdout, stderr) => {
+        if (err) {
+          console.error('Error getting FFmpeg devices:', err);
+          reject(err);
+          return;
+        }
 
-      resolve(devices);
+        const deviceLines = stderr
+          .split('\n')
+          .filter(l => l.toLowerCase().includes('dshow') && l.includes('"') && !l.toLowerCase().includes('audio'));
+
+        const devices = deviceLines
+          .map(l => {
+            const match = l.match(/"([^"]+)"/);
+            if (match) {
+              const fullName = match[1];
+              // Extract just the camera name without the @ symbol and any additional info
+              const name = fullName.split('@')[0].trim();
+              return {
+                name: name,
+                fullName: fullName
+              };
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        if (devices.length === 0) {
+          console.warn('No FFmpeg devices found');
+        }
+
+        resolve(devices);
+      });
     });
-  });
+  } catch (error) {
+    console.error('Error in get-ffmpeg-devices handler:', error);
+    throw error;
+  }
 });
 
 // Add new IPC handler for FFmpeg path configuration
