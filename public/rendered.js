@@ -34,37 +34,31 @@ function confirmAndReplaceLiveMonitor(action) {
 
 // When the user clicks "Go Live" on a camera, show its stream in the live monitor.
 window.goLive = async function(cameraId) {
+  const camEl = document.getElementById(cameraId);
+  console.log("Audio ID on cam:", camEl.dataset.audioDeviceId);
+
   if (!confirm(`Do you want to add camera ${cameraId} to the live monitor feed?`)) {
     return;
   }
 
   confirmAndReplaceLiveMonitor(async () => {
-    const camEl = document.getElementById(cameraId);
     const liveMonitor = document.getElementById("liveMonitor");
     
     try {
-      // 1) Get the camera stream
-      const deviceId = camEl.dataset.deviceId
-        || (await navigator.mediaDevices
-             .enumerateDevices()
-             .then(list => list.find(d => d.kind==="videoinput").deviceId));
-      
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: deviceId }}, 
-        audio: false
-      });
+      const constraints = {
+        video: camEl.dataset.deviceId ? { deviceId: { exact: camEl.dataset.deviceId } } : true,
+        audio: camEl.dataset.audioDeviceId ? { deviceId: { exact: camEl.dataset.audioDeviceId } } : false
+      };
 
-      // 2) Show the stream in the camera preview
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
       camEl.srcObject = stream;
-      camEl.dataset.deviceId = deviceId;
       camEl.play();
 
-      // 3) Show the same stream in the Live Monitor
       liveMonitor.srcObject = stream;
       liveMonitor.play();
       
-      console.log(`Camera ${cameraId} is now live in monitor.`);
-      // Don't update live status here - only when actually streaming
+      console.log(`Camera ${cameraId} is now live in monitor with audio:`, !!constraints.audio);
     } catch (error) {
       console.error('Error starting camera stream:', error);
       alert('Failed to start camera stream: ' + error.message);
@@ -280,9 +274,9 @@ window.showSettings = async function(button, settingsId, camId) {
   }
 
   try {
-    // Get physical cameras using MediaDevices API
     const devices = await navigator.mediaDevices.enumerateDevices();
     const videoInputs = devices.filter(device => device.kind === 'videoinput');
+    const audioInputs = devices.filter(device => device.kind === 'audioinput');
     
     if (videoInputs.length === 0) {
       alert("No camera devices found!");
@@ -298,88 +292,123 @@ window.showSettings = async function(button, settingsId, camId) {
     let settingsDiv = document.createElement("div");
     settingsDiv.id = settingsId;
     settingsDiv.className = "settings-menu";
-    const select = document.createElement("select");
-    select.classList.add("camera-select");
 
-    // Add a default "Select Camera" option
-    const defaultOption = document.createElement("option");
-    defaultOption.value = "";
-    defaultOption.textContent = "Select Camera";
-    select.appendChild(defaultOption);
-
-    // Add all available physical cameras
-    videoInputs.forEach((device, index) => {
-      const option = document.createElement("option");
-      option.value = device.deviceId;
-      // Use device label if available, otherwise use a generic name
-      option.textContent = device.label || `Camera ${index + 1}`;
-      select.appendChild(option);
+    // Create camera select with proper ID
+    const cameraLabel = document.createElement("label");
+    cameraLabel.textContent = "Camera: ";
+    cameraLabel.htmlFor = "streamSelect";
+    
+    const cameraSelect = document.createElement("select");
+    cameraSelect.id = "streamSelect";
+    cameraSelect.innerHTML = '<option value="">Select Camera</option>';
+    
+    videoInputs.forEach((device, idx) => {
+      const label = device.label || `Camera ${idx+1}`;
+      const opt = new Option(label, device.deviceId);
+      cameraSelect.appendChild(opt);
     });
 
-    // Set current selection if any
+    // Create mic select with proper ID
+    const micLabel = document.createElement("label");
+    micLabel.textContent = "Microphone: ";
+    micLabel.htmlFor = "micSelect";
+    
+    const micSelect = document.createElement("select");
+    micSelect.id = "micSelect";
+    micSelect.innerHTML = '<option value="">Select Microphone</option>';
+    
+    audioInputs.forEach((device, i) => {
+      const label = device.label || `Mic ${i+1}`;
+      micSelect.appendChild(new Option(label, device.deviceId));
+    });
+
+    // Set current selections if any
     if (videoElement.dataset.deviceId) {
-      select.value = videoElement.dataset.deviceId;
+      cameraSelect.value = videoElement.dataset.deviceId;
+    }
+    if (videoElement.dataset.audioDeviceId) {
+      micSelect.value = videoElement.dataset.audioDeviceId;
     }
 
-    select.addEventListener("change", async (event) => {
-      const selectedDeviceId = event.target.value;
-      if (!selectedDeviceId) {
-        // If "Select Camera" is chosen, stop the current stream
-        if (videoElement.srcObject) {
-          videoElement.srcObject.getTracks().forEach(track => track.stop());
-          videoElement.srcObject = null;
-        }
-        settingsDiv.remove();
-        return;
-      }
+    // Combined change handler for both camera and mic
+    async function updateStream() {
+      const selectedCameraId = cameraSelect.value;
+      const selectedMicId = micSelect.value;
 
       try {
-        // Stop any existing stream
         if (videoElement.srcObject) {
           videoElement.srcObject.getTracks().forEach(track => track.stop());
         }
 
-        // Get stream from selected camera
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: selectedDeviceId } },
-          audio: false
-        });
+        if (!selectedCameraId && !selectedMicId) {
+          videoElement.srcObject = null;
+          return;
+        }
 
-        // Update video element
+        // Store the audio device ID on the video element
+        videoElement.dataset.audioDeviceId = selectedMicId;
+        
+        const constraints = {
+          video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : false,
+          audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : false
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoElement.srcObject = stream;
-        videoElement.dataset.deviceId = selectedDeviceId;
+        videoElement.dataset.deviceId = selectedCameraId;
         videoElement.play();
 
-        console.log(`Camera ${camId} updated with device: ${selectedDeviceId}`);
+        console.log(`Updated ${camId} with camera: ${selectedCameraId}, mic: ${selectedMicId}`);
       } catch (error) {
-        console.error(`Error setting up camera for ${camId}:`, error);
-        alert(`Failed to set up camera: ${error.message}`);
+        console.error(`Error setting up devices for ${camId}:`, error);
+        alert(`Failed to set up devices: ${error.message}`);
       }
+    }
 
-      settingsDiv.remove();
-    });
+    cameraSelect.addEventListener("change", updateStream);
+    micSelect.addEventListener("change", updateStream);
 
-    settingsDiv.appendChild(select);
+    // Add elements to settings div
+    settingsDiv.appendChild(cameraLabel);
+    settingsDiv.appendChild(cameraSelect);
+    settingsDiv.appendChild(document.createElement("br"));
+    settingsDiv.appendChild(micLabel);
+    settingsDiv.appendChild(micSelect);
+
     document.body.appendChild(settingsDiv);
+
+    // Position the settings menu
     const buttonRect = button.getBoundingClientRect();
     settingsDiv.style.position = "absolute";
     settingsDiv.style.left = `${buttonRect.left}px`;
     settingsDiv.style.top = `${buttonRect.bottom}px`;
     settingsDiv.style.zIndex = 9999;
 
-    // Add some basic styling to the settings menu
+    // Add styling
     settingsDiv.style.backgroundColor = "#333";
-    settingsDiv.style.padding = "10px";
+    settingsDiv.style.padding = "15px";
     settingsDiv.style.borderRadius = "5px";
     settingsDiv.style.boxShadow = "0 2px 10px rgba(0,0,0,0.2)";
     
-    select.style.width = "200px";
-    select.style.padding = "5px";
-    select.style.backgroundColor = "#444";
-    select.style.color = "white";
-    select.style.border = "1px solid #555";
-    select.style.borderRadius = "3px";
+    const selects = settingsDiv.querySelectorAll('select');
+    selects.forEach(select => {
+      select.style.width = "200px";
+      select.style.padding = "5px";
+      select.style.marginBottom = "10px";
+      select.style.backgroundColor = "#444";
+      select.style.color = "white";
+      select.style.border = "1px solid #555";
+      select.style.borderRadius = "3px";
+    });
 
+    const labels = settingsDiv.querySelectorAll('label');
+    labels.forEach(label => {
+      label.style.color = "white";
+      label.style.display = "block";
+      label.style.marginBottom = "5px";
+    });
+
+    // Close menu when clicking outside
     document.addEventListener('click', function handleOutsideClick(e) {
       if (!settingsDiv.contains(e.target) && e.target !== button) {
         settingsDiv.remove();
@@ -388,7 +417,7 @@ window.showSettings = async function(button, settingsId, camId) {
     });
   } catch (error) {
     console.error("Error in showSettings:", error);
-    alert("Error loading camera settings: " + error.message);
+    alert("Error loading device settings: " + error.message);
   }
 };
 
@@ -404,20 +433,38 @@ window.showSettings = async function(button, settingsId, camId) {
         option.textContent = name;
         streamSelect.appendChild(option);
       });
+      const micSelect = document.getElementById("micSelect");
+      if (micSelect) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === 'audioinput');
+        audioInputs.forEach((device, i) => {
+          const opt = document.createElement("option");
+          opt.value = device.label || `Mic ${i+1}`;
+          opt.textContent = device.label || `Mic ${i+1}`;
+          micSelect.appendChild(opt);
+        });
+      }
+
       document.getElementById("start-stream").addEventListener("click", async () => {
-        console.log("Start Live Stream button clicked!");
-        const ffmpegDeviceName = streamSelect.value;
-        console.log("Selected FFmpeg device:", ffmpegDeviceName);
-        const browserDeviceId = await getBrowserDeviceIdForFFmpegName(ffmpegDeviceName);
-        if (!browserDeviceId) {
-          alert("No matching browser device found for the selected camera.");
-          return;
-        }
-        console.log("Mapped to browser device ID:", browserDeviceId);
-        await updateCameraPreview("liveMonitor", browserDeviceId);
-        const rtmpUrl = "rtmp://localhost/live/stream";
-        console.log("Starting FFmpeg stream with:", rtmpUrl, ffmpegDeviceName);
-        window.electronAPI.startFFmpeg(rtmpUrl, ffmpegDeviceName);
+        const streamSelect = document.getElementById("streamSelect");
+        const micSelect = document.getElementById("micSelect");
+
+        const cameraName = streamSelect.value;
+        const micName = micSelect.value;
+
+        const videoDeviceId = await getBrowserDeviceIdForFFmpegName(cameraName);
+        const audioDeviceId = await getBrowserDeviceIdForFFmpegName(micName);
+
+        if (!videoDeviceId) return alert("No matching camera found.");
+        if (!audioDeviceId) return alert("No matching microphone found.");
+
+        await updateCameraPreview("liveMonitor", videoDeviceId);
+
+        window.electronAPI.startFFmpeg(
+          "rtmp://localhost/live/stream",
+          cameraName,
+          micName
+        );
       });
     }
   } catch (err) {
