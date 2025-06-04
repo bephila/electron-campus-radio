@@ -1,3 +1,4 @@
+// public/rendered.js
 // Helper functions
 function updateLiveStatus(status) {
   const liveStatus = document.getElementById("live-status");
@@ -9,6 +10,100 @@ function updateLiveStatus(status) {
     liveStatus.textContent = "Offline";
     liveStatus.classList.remove("live-on");
     liveStatus.classList.add("live-off");
+  }
+}
+
+// Audio Visualizer for Live Monitor
+let audioVisualizerCanvas = null;
+let audioContext = null;
+let audioAnalyser = null;
+let audioSource = null;
+
+function stopAudioVisualization() {
+  if (audioSource) {
+    audioSource.disconnect();
+    audioSource = null;
+  }
+  
+  if (audioAnalyser) {
+    audioAnalyser.disconnect();
+    audioAnalyser = null;
+  }
+}
+
+function setupAudioStreamCapture(audioElement) {
+  const liveMonitor = document.getElementById("liveMonitor");
+  
+  // Clean up any existing content
+  cleanupAudioVisualization();
+  
+  // Set the soundwave video as source
+  liveMonitor.src = "icons/soundwave.mp4";
+  liveMonitor.loop = true;
+  liveMonitor.muted = true; // Video is muted, audio comes from deckA
+  liveMonitor.play();
+  
+  // Create audio context for streaming
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  try {
+    // Create audio source from deckA
+    const source = audioContext.createMediaElementSource(audioElement);
+    const destination = audioContext.createMediaStreamDestination();
+    
+    // Connect audio to both speakers and destination
+    source.connect(audioContext.destination);
+    source.connect(destination);
+    
+    // Wait for video to load, then get its stream
+    liveMonitor.addEventListener('loadeddata', () => {
+      try {
+        // Get video stream from live monitor
+        const videoStream = liveMonitor.captureStream(30);
+        
+        // Combine video and audio streams
+        const combinedStream = new MediaStream([
+          ...videoStream.getVideoTracks(),
+          ...destination.stream.getAudioTracks()
+        ]);
+        
+        // Store reference to the combined stream for capture
+        liveMonitor.combinedStream = combinedStream;
+        
+        console.log("Soundwave video with audio stream ready");
+      } catch (error) {
+        console.error("Error creating combined stream:", error);
+      }
+    }, { once: true });
+    
+    return destination.stream; // Return just audio for now
+  } catch (error) {
+    console.error("Error setting up audio stream capture:", error);
+    return null;
+  }
+}
+
+function cleanupAudioVisualization() {
+  stopAudioVisualization();
+  
+  const liveMonitor = document.getElementById("liveMonitor");
+  
+  // Remove any video source and stop streams
+  if (liveMonitor.srcObject) {
+    liveMonitor.srcObject.getTracks().forEach(track => track.stop());
+    liveMonitor.srcObject = null;
+  }
+  
+  liveMonitor.removeAttribute('src');
+  liveMonitor.loop = false;
+  liveMonitor.pause();
+  
+  // Remove canvas if it exists
+  if (audioVisualizerCanvas && audioVisualizerCanvas.parentElement) {
+    audioVisualizerCanvas.parentElement.removeChild(audioVisualizerCanvas);
+    audioVisualizerCanvas = null;
   }
 }
 
@@ -88,7 +183,6 @@ window.stopLive = function(cameraId) {
   console.log(`Camera ${cameraId} stopped.`);
 };
 
-// Add this function before the DOMContentLoaded event listener
 async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -125,6 +219,34 @@ async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
     console.error('Error getting browser device ID:', error);
     throw error;
   }
+}
+function ensureAudioInStream(originalStream) {
+  const deckA = document.getElementById("deckA");
+  
+  // If deckA is playing audio and we have an audio context
+  if (deckA && !deckA.paused && deckA.dataset.fileType === "audio" && audioContext) {
+    try {
+      // Create a new destination for the combined stream
+      const destination = audioContext.createMediaStreamDestination();
+      
+      // Add video tracks from original stream if any
+      originalStream.getVideoTracks().forEach(track => {
+        destination.stream.addTrack(track);
+      });
+      
+      // Connect deckA audio to the destination
+      const source = audioContext.createMediaElementSource(deckA);
+      source.connect(destination);
+      source.connect(audioContext.destination); // Also play to speakers
+      
+      return destination.stream;
+    } catch (error) {
+      console.error("Error ensuring audio in stream:", error);
+      return originalStream;
+    }
+  }
+  
+  return originalStream;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -202,13 +324,6 @@ async function populateCameraDevices() {
   }
 }
 
-function showCameraStream(stream) {
-  const lm = document.getElementById("liveMonitor");
-  lm.pause(); lm.removeAttribute("src"); lm.removeAttribute("srcObject");
-  lm.srcObject = stream;
-  lm.play();
-}
-
 function showFile(url) {
   const lm = document.getElementById("liveMonitor");
   if (lm.srcObject) lm.srcObject.getTracks().forEach(t=>t.stop());
@@ -230,6 +345,7 @@ function getAudioDuration(file, lengthCell, row) {
       let duration = formatTime(audio.duration);
       lengthCell.textContent = duration;
       row.dataset.fileDuration = duration;
+      updateTotalTime(); // Update total when duration is loaded
       URL.revokeObjectURL(audio.src);
   });
 }
@@ -242,6 +358,7 @@ function getVideoDuration(file, lengthCell, row) {
       let duration = formatTime(video.duration);
       lengthCell.textContent = duration;
       row.dataset.fileDuration = duration;
+      updateTotalTime(); // Update total when duration is loaded
       URL.revokeObjectURL(video.src);
   });
 }
@@ -481,6 +598,7 @@ window.showSettings = async function(button, settingsId, camId) {
   }
 
   await populateCameraDevices();
+  setupPlaylistRowDragDrop();
 
   const liveMonitor = document.getElementById("liveMonitor");
   const liveStatus = document.getElementById("live-status");
@@ -488,25 +606,44 @@ window.showSettings = async function(button, settingsId, camId) {
   const deckA = document.getElementById("deckA");
   const deckB = document.getElementById("deckB");
   const seekControl = document.getElementById("seekA"); 
-  let mediaStreams = {}; 
-  let activeCameraId = null;
-  let isStreaming = false;
-  let rtmpUrl = "rtmp://localhost/live/stream";
-  let draggedRow = null; 
-  let lastSeekTimeUpdate = 0; 
   let isScrubbing = false; 
 
-  deckA.addEventListener("play", () => {
-      if (deckA.dataset.fileType === "video") {
-          showFile(deckA.src);
-          deckA.muted = true;
-          console.log("Video playing – deckA muted.");
-      } else if (deckA.dataset.fileType === "audio") {
-          deckA.muted = false;
-          console.log("Audio playing – deckA unmuted.");
-      }
-  });        
+deckA.addEventListener("play", () => {
+  const liveMonitor = document.getElementById("liveMonitor");
   
+  if (deckA.dataset.fileType === "video") {
+      cleanupAudioVisualization();
+      showFile(deckA.src);
+      deckA.muted = true;
+      console.log("Video playing – deckA muted.");
+  } else if (deckA.dataset.fileType === "audio") {
+      deckA.muted = false;
+      console.log("Audio playing – deckA unmuted.");
+      
+      // Create audio context if not exists
+      if (!audioContext) {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      try {
+          // Clean up any existing content
+          cleanupAudioVisualization();
+          
+          // Set up audio stream capture with soundwave video
+          const combinedStream = setupAudioStreamCapture(deckA);
+          
+          console.log("Audio with soundwave video setup complete");
+      } catch (error) {
+          console.error("Error setting up audio with soundwave:", error);
+          // Fallback: just play the soundwave video without audio streaming
+          liveMonitor.src = "icons/soundwave.mp4";
+          liveMonitor.loop = true;
+          liveMonitor.muted = true;
+          liveMonitor.play();
+      }
+  }
+});
+
   function syncLiveMonitor() {
       if (deckA.dataset.fileType === "video" && deckA.duration && !isScrubbing) {
           requestAnimationFrame(() => {
@@ -552,94 +689,6 @@ window.showSettings = async function(button, settingsId, camId) {
     loadDeckA(currentIndex);
     loadDeckB(currentIndex + 1);
   });
-  
-
-  function shiftTracks() {
-      if (deckB.src && deckB.src !== "") {
-          console.log("Shifting track from Deck B to Deck A...");
-          deckA.src = deckB.src;
-          deckA.dataset.fileType = deckB.dataset.fileType;
-          deckA.dataset.fileName = deckB.dataset.fileName;
-          
-          if (deckA.dataset.fileType === "audio") {
-              deckA.muted = false;
-              console.log("Audio track detected – deckA unmuted.");
-          }
-
-          if (deckA.dataset.fileType === "video") {
-            showFile(deckA.src);
-          }
-          
-          deckA.play();
-          
-          deckB.src = "";
-          deckB.removeAttribute("data-file-type");
-          deckB.removeAttribute("data-file-name");
-      }
-      processPlaylist();
-  }
-  
-  async function saveSession() {
-    const { dialog } = require('electron').remote;
-    const fs       = require('fs');
-    // build session payload
-    const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
-    const playlist = rows.map(r => ({
-      fileName: r.dataset.fileName,
-      fileUrl:  r.dataset.fileUrl,
-      fileType: r.dataset.fileType,
-      fileDuration: r.dataset.fileDuration
-    }));
-    const nowIdx = rows.findIndex(r => r.classList.contains('playing'));
-    const deckA = document.getElementById('deckA');
-    const name = await dialog.showInputBox({ prompt: 'Session name?' })
-               || `session-${new Date().toISOString().slice(0,10)}`;
-    const session = {
-      created: new Date().toISOString(),
-      name,
-      playlist,
-      nowPlayingIndex: nowIdx,
-      deckA: { src: deckA.src, currentTime: deckA.currentTime }
-    };
-  
-    const { filePath } = await dialog.showSaveDialog({
-      title: 'Save session',
-      defaultPath: `${name}.json`,
-      filters: [{ name:'Session', extensions:['json'] }]
-    });
-    if (filePath) fs.writeFileSync(filePath, JSON.stringify(session,null,2), 'utf-8');
-  }
-  
-  async function loadSession() {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Load session',
-      properties: ['openFile'],
-      filters: [{ name:'Session', extensions:['json'] }]
-    });
-    if (canceled) return;
-    const session = JSON.parse(fs.readFileSync(filePaths[0], 'utf-8'));
-  
-    // re-populate playlist
-    const tbody = document.getElementById('playlist-items');
-    tbody.innerHTML = `<tr class="drop-placeholder">
-        <td colspan="4" style="text-align:center;color:gray;">Drag & drop items here</td>
-      </tr>`;
-    session.playlist.forEach(item => addToPlaylist(item));
-  
-    // restore now playing
-    if (session.nowPlayingIndex >= 0) {
-      const deckA = document.getElementById('deckA');
-      deckA.src = session.deckA.src;
-      deckA.currentTime = session.deckA.currentTime;
-      deckA.play();
-      highlightRow(session.nowPlayingIndex);
-    }
-  }
-  
-  // wire up buttons
-  document.getElementById('save-session').addEventListener('click', saveSession);
-  document.getElementById('load-session').addEventListener('click', loadSession);
-  
 
   function getActiveCamera() {
     const camIds = ['cam1','cam2','cam3','cam4'];
@@ -678,90 +727,126 @@ window.showSettings = async function(button, settingsId, camId) {
   }
 
   startBtn.addEventListener("click", async () => {
-    if (!confirm("Are you sure you want to start live streaming? This will begin broadcasting the current live monitor feed.")) {
-      return;
+  if (!confirm("Are you sure you want to start live streaming? This will begin broadcasting the current live monitor feed.")) {
+    return;
+  }
+
+  try {
+    const liveMonitor = document.getElementById("liveMonitor");
+    let streamToCapture;
+
+    // Always create a stream, even if live monitor is empty
+    if (liveMonitor.combinedStream) {
+      streamToCapture = liveMonitor.combinedStream;
+    } else if (liveMonitor.srcObject && liveMonitor.srcObject.getTracks().length > 0) {
+      streamToCapture = liveMonitor.srcObject;
+    } else {
+      // Create a black canvas with silent audio as fallback
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Add text to indicate no content
+      ctx.fillStyle = 'white';
+      ctx.font = '48px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Cheers Campus Radio', canvas.width/2, canvas.height/2);
+      
+      // Create canvas stream with audio
+      const canvasStream = canvas.captureStream(30);
+      
+      // Create silent audio track
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      const destination = audioContext.createMediaStreamDestination();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(destination);
+      gainNode.gain.value = 0; // Silent
+      oscillator.start();
+      
+      // Combine video and silent audio
+      streamToCapture = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...destination.stream.getAudioTracks()
+      ]);
     }
 
+    streamToCapture = ensureAudioInStream(streamToCapture);
+
+    // Start WebSocket streaming
     try {
-      const liveMonitor = document.getElementById("liveMonitor");
-      if (!liveMonitor.srcObject && !liveMonitor.src) {
-        alert("No content in Live Monitor! Please add some content first.");
+      const mimeType = getSupportedMimeType();
+      
+      if (!mimeType) {
+        console.warn("No supported MIME types found for MediaRecorder");
         return;
       }
 
-      // Start FFmpeg stream
-      const rtmpUrl = "rtmp://localhost/live/stream";
-      console.log("Starting stream with content from Live Monitor");
+      ws = new WebSocket("ws://localhost:9999");
       
-      // Start WebSocket streaming
-      try {
-        // Check if captureStream is supported
-        if (!liveMonitor.captureStream) {
-          console.warn("captureStream not supported in this browser");
-          return;
-        }
+      ws.addEventListener("open", () => {
+        try {
+          mediaRecorder = new MediaRecorder(streamToCapture, { 
+            mimeType: mimeType,
+            videoBitsPerSecond: 1000000, // Further reduced
+            audioBitsPerSecond: 96000    // Further reduced
+          });
 
-        const stream = liveMonitor.captureStream(30);
-        const mimeType = getSupportedMimeType();
-        
-        if (!mimeType) {
-          console.warn("No supported MIME types found for MediaRecorder");
-          return;
-        }
-
-        ws = new WebSocket("ws://localhost:9999");
-        
-        ws.addEventListener("open", () => {
-          try {
-            mediaRecorder = new MediaRecorder(stream, { 
-              mimeType: mimeType,
-              videoBitsPerSecond: 2500000,
-              audioBitsPerSecond: 192000
-            });
-            
-            mediaRecorder.ondataavailable = e => {
-              if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                try {
-                  ws.send(e.data);
-                } catch (error) {
-                  console.error('Error sending data to WebSocket:', error);
-                }
+          mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+              try {
+                // Add small delay to buffer the stream
+                setTimeout(() => {
+                  if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(e.data);
+                  }
+                }, 2000); // 2 second delay for smoother streaming
+              } catch (error) {
+                console.error('Error sending data to WebSocket:', error);
               }
-            };
+            }
+          };
 
-            mediaRecorder.onerror = (event) => {
-              console.error('MediaRecorder error:', event);
-              alert('MediaRecorder error: ' + event.error);
-              updateLiveStatus(false);
-            };
-            
-            mediaRecorder.start(500);
-            console.log("MediaRecorder started successfully with mimeType:", mimeType);
-            updateLiveStatus(true); // Only update live status when actually streaming
-          } catch (error) {
-            console.error('Error starting MediaRecorder:', error);
-            alert('Failed to start MediaRecorder: ' + error.message);
+          mediaRecorder.onerror = (event) => {
+            console.error('MediaRecorder error:', event);
+            alert('MediaRecorder error: ' + event.error);
             updateLiveStatus(false);
-          }
-        });
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          alert('WebSocket error: ' + error.message);
+          };
+          
+          mediaRecorder.start(1000);
+          console.log("MediaRecorder started successfully with mimeType:", mimeType);
+          updateLiveStatus(true);
+        } catch (error) {
+          console.error('Error starting MediaRecorder:', error);
+          alert('Failed to start MediaRecorder: ' + error.message);
           updateLiveStatus(false);
-        };
-      } catch (error) {
-        console.warn("WebSocket streaming not available:", error);
-        alert('WebSocket streaming not available: ' + error.message);
-        updateLiveStatus(false);
-      }
+        }
+      });
 
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        alert('WebSocket error: ' + error.message);
+        updateLiveStatus(false);
+      };
     } catch (error) {
-      console.error("Error starting stream:", error);
-      alert("Failed to start stream: " + error.message);
+      console.warn("WebSocket streaming not available:", error);
+      alert('WebSocket streaming not available: ' + error.message);
       updateLiveStatus(false);
     }
-  });
+
+  } catch (error) {
+    console.error("Error starting stream:", error);
+    alert("Failed to start stream: " + error.message);
+    updateLiveStatus(false);
+  }
+});
 
   stopBtn.addEventListener("click", () => {
     if (!confirm("Are you sure you want to stop the live stream?")) {
@@ -794,160 +879,127 @@ window.showSettings = async function(button, settingsId, camId) {
       console.error("Error stopping stream:", error);
     }
   });
+let isFading = false; // Add this variable at the top with other variables
 
-  document.getElementById("fadeButton").addEventListener("click", function () {
-      let fadeTime = 5000;
-      let startVolumeA = deckA.volume;
-      let startVolumeB = deckB.volume;
-      let fadeOut = setInterval(() => {
-          if (deckA.volume > 0) {
-              deckA.volume = Math.max(0, deckA.volume - 0.05);
-          }
-          if (deckB.volume < startVolumeB) {
-              deckB.volume = Math.min(startVolumeB, deckB.volume + 0.05);
-          }
-          if (deckA.volume <= 0) {
-              clearInterval(fadeOut);
-              deckA.pause();
-          }
-      }, fadeTime / 20);
+document.getElementById("fadeButton").addEventListener("click", function () {
+    if (isFading) return; // Prevent multiple fades
+    
+    // Check if deck B has content to fade to
+    if (!deckB.src || deckB.src === "") {
+        alert("No next track available to fade to!");
+        return;
+    }
+    
+    isFading = true;
+    const fadeButton = document.getElementById("fadeButton");
+    
+    // Gray out the button and show it's active
+    fadeButton.style.background = "#6e6e73";
+    fadeButton.style.cursor = "not-allowed";
+    fadeButton.textContent = "Fading...";
+    
+    let fadeTime = 4000; // 4 seconds fade
+    let fadeSteps = 80; // Number of steps for smooth fade
+    let stepTime = fadeTime / fadeSteps;
+    let currentStep = 0;
+    
+    // Set initial volumes
+    deckA.volume = 1.0;
+    deckB.volume = 0.0;
+    
+    // Start playing deck B if it's not already playing
+    if (deckB.paused) {
+        deckB.play();
+    }
+    
+    const fadeInterval = setInterval(() => {
+        currentStep++;
+        let progress = currentStep / fadeSteps;
+        
+        // Smooth fade curve
+        deckA.volume = Math.max(0, 1 - progress);
+        deckB.volume = Math.min(1, progress);
+        
+        // When fade is complete
+        if (currentStep >= fadeSteps) {
+            clearInterval(fadeInterval);
+            
+            // Stop deck A and swap the tracks
+            deckA.pause();
+            deckA.currentTime = 0;
+            
+            // Move deck B content to deck A
+            deckA.src = deckB.src;
+            deckA.dataset.fileType = deckB.dataset.fileType;
+            deckA.dataset.fileName = deckB.dataset.fileName;
+            
+            // Set volumes
+            deckA.volume = 1.0;
+            deckB.volume = 0.0;
+            
+            // Start playing the new deck A
+            deckA.play();
+            
+            // Move to next track
+            currentIndex++;
+            
+            // Update highlighting
+            highlightRow(currentIndex);
+            
+            // Load next track to deck B
+            loadDeckB(currentIndex + 1);
+            
+            // Reset button state
+            isFading = false;
+            fadeButton.style.background = "linear-gradient(135deg, #FF9500, #FF6D00)";
+            fadeButton.style.cursor = "pointer";
+            fadeButton.textContent = "Crossfade";
+            
+            console.log(`Crossfade complete. Now playing: ${deckA.dataset.fileName}`);
+        }
+    }, stepTime);
+});
+  
+  const playlist = document.getElementById('playlist');
+
+  playlist.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    playlist.classList.add('drag-over');
   });
-  
-    const playlist = document.getElementById('playlist');
 
-    playlist.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-      playlist.classList.add('drag-over');  // optional visual feedback
-    });
-    
-    playlist.addEventListener('dragleave', e => {
-      e.preventDefault();
-      playlist.classList.remove('drag-over');
-    });
-    
-    playlist.addEventListener('drop', e => {
-      e.preventDefault();
-      playlist.classList.remove('drag-over');
-    
-      const raw = e.dataTransfer.getData('application/json');
-      if (!raw) return;
-      const fileData = JSON.parse(raw);
-    
-      // 1) Add a row to the UI
-      addToPlaylist(fileData);
-    
-      // 2) Add to the array
-      playlistFiles.push(fileData);
-    
-      // 3) If this is the very first track, start Deck A
-      if (currentIndex === -1) {
-        currentIndex = 0;
-        loadDeckA(currentIndex);
-      }
-    
-      // 4) Always (re)load Deck B with the *next* track
-      loadDeckB(currentIndex + 1);
-    });
-    
-    async function saveSession() {
-      // build the session object
-      const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
-      const playlist = rows.map(r => ({
-        fileName:     r.dataset.fileName,
-        fileUrl:      r.dataset.fileUrl,
-        fileType:     r.dataset.fileType,
-        fileDuration: r.dataset.fileDuration
-      }));
-      const nowIdx = rows.findIndex(r => r.classList.contains('playing'));
-      const deckA = document.getElementById('deckA');
-      const session = {
-        created: new Date().toISOString(),
-        name:    await dialog.showInputBox({ prompt: 'Session name?' }) || `session-${Date.now()}`,
-        playlist,
-        nowPlayingIndex: nowIdx,
-        deckA: { src: deckA.src, currentTime: deckA.currentTime }
-      };
-    
-      const { filePath } = await dialog.showSaveDialog({
-        title: 'Save session file',
-        defaultPath: `${session.name}.json`,
-        filters: [{ name:'Session', extensions:['json'] }]
-      });
-      if (!filePath) return;
-      fs.writeFileSync(filePath, JSON.stringify(session, null,2), 'utf-8');
-    }
-    
-    async function loadSession() {
-      const { canceled, filePaths } = await dialog.showOpenDialog({
-        title: 'Open session file',
-        properties: ['openFile'],
-        filters: [{ name:'Session', extensions:['json'] }]
-      });
-      if (canceled || !filePaths.length) return;
-      const session = JSON.parse(fs.readFileSync(filePaths[0], 'utf-8'));
-    
-      // clear existing
-      document.getElementById('playlist-items').innerHTML = '';
-      session.playlist.forEach(item => {
-        addToPlaylist(item);          // your existing helper
-      });
-    
-      // restore "now playing"
-      if (session.nowPlayingIndex >= 0) {
-        highlightRow(session.nowPlayingIndex);
-        const deckA = document.getElementById('deckA');
-        deckA.src = session.deckA.src;
-        deckA.currentTime = session.deckA.currentTime;
-        deckA.play();
-      }
-    }
-    
-    // wire up your buttons:
-    document.getElementById('save-session').addEventListener('click', saveSession);
-    document.getElementById('load-session').addEventListener('click', loadSession);
-  
-  function playMedia(url, type) {
-      if (type === "audio") {
-          let deckA = document.getElementById("deckA");
-          deckA.src = url;
-          deckA.play();
-      } else if (type === "video") {
-          let monitor = document.getElementById("liveMonitor");
-          monitor.src = url;
-          monitor.play();
-      }
-  }
-  
-  function processPlaylist() {
-    const playlistTable = document.getElementById("playlist-items");
-    const rows = Array.from(playlistTable.querySelectorAll('tr:not(.drop-placeholder)'));
-    if (!deckA.src && rows.length) {
-      const fileData = {
-        fileName: rows[0].dataset.fileName,
-        fileType: rows[0].dataset.fileType,
-        fileUrl: rows[0].dataset.fileUrl,
-        fileDuration: rows[0].dataset.fileDuration
-      };
-      deckA.src = fileData.fileUrl;
-      deckA.dataset.fileType = fileData.fileType;
-      
-      // Set audio properties
-      if (fileData.fileType === "audio") {
-        deckA.muted = false;
-      } else if (fileData.fileType === "video") {
-        deckA.muted = true;
-      }
-      
-      deckA.play();
-      highlightRow(0);
-    }
-  }
+  playlist.addEventListener('dragleave', e => {
+    e.preventDefault();
+    playlist.classList.remove('drag-over');
+  });
 
-  function loadToDeck(fileData) {
-      addToPlaylist(fileData);
-      if (fileData.fileType === "audio") processPlaylist();
-  }
+  playlist.addEventListener('drop', e => {
+    e.preventDefault();
+    playlist.classList.remove('drag-over');
+
+    const raw = e.dataTransfer.getData('application/json');
+    if (!raw) return;
+    const fileData = JSON.parse(raw);
+    
+    // Check if this is a reorder operation (dragging within playlist)
+    const draggedFromPlaylist = e.dataTransfer.getData('text/plain') === 'playlist-reorder';
+    
+    if (draggedFromPlaylist) {
+      // This is handled by the row-level drop event, do nothing here
+      return;
+    }
+
+    // This is a new item being added from media library
+    addToPlaylist(fileData);
+    playlistFiles.push(fileData);
+
+    if (currentIndex === -1) {
+      currentIndex = 0;
+      loadDeckA(currentIndex);
+    }
+
+    loadDeckB(currentIndex + 1);
+  });
   
   function highlightRow(idx) {
     document.querySelectorAll('#playlist-items tr').forEach(r =>
@@ -977,70 +1029,182 @@ window.showSettings = async function(button, settingsId, camId) {
     highlightRow(idx);
   }
   
-  function loadDeckB(idx) {
-    if (idx < 0 || idx >= playlistFiles.length) {
-      deckB.removeAttribute('src');
-      return;
-    }
-    const fd = playlistFiles[idx];
-    deckB.src               = fd.fileUrl;
-    deckB.dataset.fileType  = fd.fileType;
-    deckB.dataset.fileName  = fd.fileName;
-  }  
+function loadDeckB(idx) {
+  if (idx < 0 || idx >= playlistFiles.length) {
+    deckB.removeAttribute('src');
+    deckB.removeAttribute('data-file-type');
+    deckB.removeAttribute('data-file-name');
+    console.log("Deck B cleared - no more tracks in queue");
+    return;
+  }
+  const fd = playlistFiles[idx];
+  deckB.src               = fd.fileUrl;
+  deckB.dataset.fileType  = fd.fileType;
+  deckB.dataset.fileName  = fd.fileName;
+  console.log(`Deck B loaded: ${fd.fileName}`);
+}
 
-  function dragItem(event) {
-    const row = event.currentTarget;       // the <tr> itself
-    event.dataTransfer.effectAllowed = 'copy';
-    const payload = {
-      fileName:     row.dataset.fileName,
-      fileType:     row.dataset.fileType,
-      fileUrl:      row.dataset.fileUrl,
-      filePath:     row.dataset.filePath,      // real path if you need it
-      fileDuration: row.dataset.fileDuration
-    };
-    event.dataTransfer.setData('application/json', JSON.stringify(payload));
-    console.log('dragging:', payload);
+function dragItem(event) {
+  const row = event.currentTarget;
+  event.dataTransfer.effectAllowed = 'move';
+  
+  const payload = {
+    fileName:     row.dataset.fileName,
+    fileType:     row.dataset.fileType,
+    fileUrl:      row.dataset.fileUrl,
+    filePath:     row.dataset.filePath,
+    fileDuration: row.dataset.fileDuration
+  };
+  
+  event.dataTransfer.setData('application/json', JSON.stringify(payload));
+  
+  // Check if dragging from playlist
+  const playlistTable = document.getElementById('playlist-items');
+  if (playlistTable.contains(row)) {
+    event.dataTransfer.setData('text/plain', 'playlist-reorder');
+    row.classList.add('dragging');
   }
   
-  function updatePlaylistOrder() {
-      const playlistItems = document.getElementById("playlist-items").children;
-      console.log("Playlist order updated:", playlistItems);
+  console.log('dragging:', payload);
+}
+
+function parseTimeToSeconds(timeString) {
+  if (!timeString || timeString === "--:--") return 0;
+  const parts = timeString.split(':');
+  const minutes = parseInt(parts[0]) || 0;
+  const seconds = parseInt(parts[1]) || 0;
+  return (minutes * 60) + seconds;
+}
+
+function formatTotalTime(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   }
+}
+
+function updateTotalTime() {
+  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
+  let totalSeconds = 0;
+  
+  rows.forEach(row => {
+    const duration = row.dataset.fileDuration;
+    totalSeconds += parseTimeToSeconds(duration);
+  });
+  
+  const totalTimeElement = document.getElementById('total-time');
+  if (totalTimeElement) {
+    totalTimeElement.textContent = formatTotalTime(totalSeconds);
+  }
+  
+  console.log(`Total playlist time: ${formatTotalTime(totalSeconds)}`);
+}
 
   // ---- Helper: addToPlaylist (used when a file is dropped) ---- //
   function addToPlaylist(fileData) {
-    const row = document.createElement("tr");
-    row.dataset.fileName     = fileData.fileName;
-    row.dataset.fileType     = fileData.fileType;
-    row.dataset.fileUrl      = fileData.fileUrl;
-    row.dataset.fileDuration = fileData.fileDuration;
-    row.setAttribute("draggable", true);
-    row.addEventListener("dragstart", dragItem);
+  const row = document.createElement("tr");
+  row.dataset.fileName     = fileData.fileName;
+  row.dataset.fileType     = fileData.fileType;
+  row.dataset.fileUrl      = fileData.fileUrl;
+  row.dataset.fileDuration = fileData.fileDuration;
+  row.setAttribute("draggable", true);
+  row.addEventListener("dragstart", dragItem);
+
+  const titleCell  = document.createElement("td");
+  titleCell.textContent = fileData.fileName;
+  const typeCell   = document.createElement("td");
+  typeCell.textContent = fileData.fileType || "Audio";
+  const lengthCell = document.createElement("td");
+  lengthCell.textContent = fileData.fileDuration || "--:--";
+
+  row.append(titleCell, typeCell, lengthCell);
+
+  // Remove‐button cell
+  const removeCell   = document.createElement("td");
+  const removeButton = document.createElement("button");
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    updatePlaylistArray();
+    updateTotalTime(); // Update total time when item is removed
+  });
+  removeCell.appendChild(removeButton);
+  row.appendChild(removeCell);
+
+  // Clean up placeholder
+  const placeholder = document.querySelector(".drop-placeholder");
+  if (placeholder) placeholder.remove();
+
+  document.getElementById("playlist-items").appendChild(row);
+  updateTotalTime(); // Update total time when item is added
+  console.log("Added to playlist:", fileData.fileName);
+}
+
+  // Add drag and drop reordering to playlist rows
+function setupPlaylistRowDragDrop() {
+  const playlistTable = document.getElementById('playlist-items');
   
-    const titleCell  = document.createElement("td");
-    titleCell.textContent = fileData.fileName;
-    const typeCell   = document.createElement("td");
-    typeCell.textContent = fileData.fileType || "Audio";
-    const lengthCell = document.createElement("td");
-    lengthCell.textContent = fileData.fileDuration || "--:--";
+  playlistTable.addEventListener('dragover', e => {
+    e.preventDefault();
+    const dragging = document.querySelector('.dragging');
+    const afterElement = getDragAfterElement(playlistTable, e.clientY);
+    
+    if (afterElement == null) {
+      playlistTable.appendChild(dragging);
+    } else {
+      playlistTable.insertBefore(dragging, afterElement);
+    }
+  });
+
+  document.addEventListener('dragover', e => {
+    if (e.target.closest('#playlist-items tr')) {
+      e.preventDefault();
+    }
+  });
   
-    row.append(titleCell, typeCell, lengthCell);
+  playlistTable.addEventListener('dragend', e => {
+    const dragging = document.querySelector('.dragging');
+    if (dragging) {
+      dragging.classList.remove('dragging');
+      updatePlaylistArray(); // Update the playlistFiles array to match new order
+    }
+  });
+}
+
+function getDragAfterElement(container, y) {
+  const draggableElements = [...container.querySelectorAll('tr:not(.dragging):not(.drop-placeholder)')];
   
-    // Remove‐button cell
-    const removeCell   = document.createElement("td");
-    const removeButton = document.createElement("button");
-    removeButton.textContent = "Remove";
-    removeButton.addEventListener("click", () => row.remove());
-    removeCell.appendChild(removeButton);
-    row.appendChild(removeCell);
+  return draggableElements.reduce((closest, child) => {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    
+    if (offset < 0 && offset > closest.offset) {
+      return { offset: offset, element: child };
+    } else {
+      return closest;
+    }
+  }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+function updatePlaylistArray() {
+  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
+  playlistFiles = rows.map(row => ({
+    fileName: row.dataset.fileName,
+    fileType: row.dataset.fileType,
+    fileUrl: row.dataset.fileUrl,
+    fileDuration: row.dataset.fileDuration
+  }));
   
-    // Clean up placeholder
-    const placeholder = document.querySelector(".drop-placeholder");
-    if (placeholder) placeholder.remove();
-  
-    document.getElementById("playlist-items").appendChild(row);
-    console.log("Added to playlist:", fileData.fileName);
-  }  
+  // Update deck B to load the correct next track
+  loadDeckB(currentIndex + 1);
+  updateTotalTime(); // Update total time when playlist is reordered
+  console.log('Playlist reordered:', playlistFiles);
+}
 
   document
   .getElementById("playlist-items")

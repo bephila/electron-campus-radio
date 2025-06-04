@@ -1,3 +1,4 @@
+// src/static-server.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
