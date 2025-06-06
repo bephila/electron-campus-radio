@@ -1,0 +1,171 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cheers</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/boxicons@2.1.4/dist/boxicons.js"></script>
+    <script src="rendered.js" defer></script>
+</head>
+<body>
+    <h1>Cheers Campus Radio</h1>
+    
+         <!-- Camera Monitors -->
+    <div class="camera-section">
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam1')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam1')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings1', 'cam1')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam1" controls></video>
+        </div>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam2')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam2')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings2', 'cam2')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam2" controls></video>
+        </div>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam3')">
+                    <img src="icons/bx-play.svg" alt="Play">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam3')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings3', 'cam3')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam3" controls></video>
+        </div>
+        <div class="camera">
+            <div class="controls">
+                <button class="icon-button" onclick="goLive('cam4')">
+                    <img src="icons/bx-play.svg" alt="aPlay">
+                </button>
+                <button class="icon-button" onclick="stopLive('cam4')">
+                    <img src="icons/bx-stop.svg" alt="Stop">
+                </button>
+                <button class="icon-button settings-button" onclick="showSettings(this, 'settings4', 'cam4')">
+                    <img src="icons/bxs-cog.svg" alt="Settings">
+                </button>
+            </div>
+            <video id="cam4" controls></video>
+        </div>
+    </div>
+
+    <!-- Live Monitor -->
+    <div class="live-video-monitor">
+        <h3>Live Monitor</h3>
+        <video id="liveMonitor" autoplay playsinline></video>
+
+        <div id="live-status" class="live-off"> Offline </div>
+            <!-- Streaming & Recording Controls -->
+            <div class="streaming-controls">
+                <button id="start-stream">Start Live Stream</button>
+                <button id="stop-stream">Stop Stream</button>
+            </div>                  
+    </div>
+
+    <!-- DJ Decks -->
+    <div id="player" class="decks">
+        <div class="deck">
+            <h3>Deck A (Now Playing)</h3>
+            <audio id="deckA" controls autoplay></audio>
+            <input type="range" id="seekA" min="0" max="100" step="0.1" value="0" style="display:none">
+        </div>        
+                <button id="fadeButton">Crossfade</button>
+        <div class="deck">
+            <h3>Deck B (Next Song)</h3>
+            <audio id="deckB" controls></audio>
+        </div>
+    </div>
+
+    <!-- Bottom Section: Playlist, Audio & Video Import Lists -->
+    <div class="bottom-section">
+        <!-- Playlist -->
+        <div class="playlist" id="playlist">
+            <h3>Playlist</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Length</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="playlist-items">
+                    <tr class="drop-placeholder">
+                        <td colspan="4" style="text-align: center; color: gray;">Drag & drop items here</td>
+                    </tr>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3" style="text-align: right; font-weight: bold;">Total Time:</td>
+                            <td id="total-time" style="font-weight: bold;">00:00:00</td>
+                        </tr>
+                    </tfoot>
+                </tbody>
+            </table>
+            
+        </div>
+        <!-- Audio Media Library (Only MP3) -->
+        <div class="media-library" id="audio-library">
+            <h3>Import MP3</h3>
+            <label class="custom-file-upload">
+                <input type="file" id="audioUpload" multiple accept=".mp3">
+                Upload MP3
+            </label>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Length</th>
+                    </tr>
+                </thead>
+                <tbody id="audio-library-items">
+                    <!-- Audio files dynamically added -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Video Media Library (Only MP4) -->
+        <div class="media-library" id="video-library">
+            <h3>Import MP4</h3>
+            <label class="custom-file-upload">
+                <input type="file" id="videoUpload" multiple accept=".mp4">
+                Upload MP4
+            </label>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Length</th>
+                    </tr>
+                </thead>
+                <tbody id="video-library-items">
+                    <!-- Video files dynamically added -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
