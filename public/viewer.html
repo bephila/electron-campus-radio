@@ -20,10 +20,21 @@
             width: 100%;
             border-radius: 8px;
             margin: 20px 0;
+            background: #000;
         }
         .status {
             padding: 10px;
             margin-bottom: 10px;
+            font-size: 18px;
+        }
+        .status.live {
+            color: #4CAF50;
+        }
+        .status.offline {
+            color: #f44336;
+        }
+        .status.loading {
+            color: #ff9800;
         }
         .controls {
             margin: 20px 0;
@@ -39,6 +50,10 @@
         }
         #playButton:hover {
             background: #ff7700;
+        }
+        #playButton:disabled {
+            background: #666;
+            cursor: not-allowed;
         }
         #playButton.hidden {
             display: none;
@@ -70,11 +85,18 @@
         #player::-webkit-media-controls-overlay-enclosure {
             pointer-events: auto !important;
         }
+        
+        .retry-info {
+            font-size: 14px;
+            color: #888;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="status">Waiting for stream...</div>
+        <h1>Campus Radio Live Stream</h1>
+        <div class="status offline">Checking stream status...</div>
         <video 
             id="player" 
             controls
@@ -86,23 +108,84 @@
         <div class="controls">
             <button id="playButton" disabled>Start Watching</button>
         </div>
+        <div class="retry-info"></div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
         const video = document.getElementById("player");
         const status = document.querySelector(".status");
         const playButton = document.getElementById("playButton");
-        const hlsUrl = "http://30.30.30.115:8080/hls/stream.m3u8";
+        const retryInfo = document.querySelector(".retry-info");
+        const hlsUrl = "http://192.168.100.24:8080/hls/stream.m3u8";
+        
         let hls = null;
         let isInitializing = false;
+        let retryCount = 0;
+        let retryTimer = null;
+        let checkInterval = null;
+        const MAX_RETRIES = 10;
+        const RETRY_DELAY = 3000; // 3 seconds
 
-        function initializeStream() {
-            if (isInitializing) return;
-            isInitializing = true;
+        function updateStatus(text, className = '') {
+            status.textContent = text;
+            status.className = 'status ' + className;
+        }
 
+        function cleanupHLS() {
             if (hls) {
                 hls.destroy();
                 hls = null;
+            }
+            if (retryTimer) {
+                clearTimeout(retryTimer);
+                retryTimer = null;
+            }
+            if (checkInterval) {
+                clearInterval(checkInterval);
+                checkInterval = null;
+            }
+            video.src = '';
+        }
+
+        async function checkStreamAvailability() {
+            try {
+                const response = await fetch(hlsUrl, { 
+                    method: 'HEAD',
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
+                return response.ok;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        async function initializeStream() {
+            if (isInitializing) return;
+            isInitializing = true;
+
+            // Clean up any existing HLS instance
+            cleanupHLS();
+
+            // Check if stream is available
+            const isAvailable = await checkStreamAvailability();
+            
+            if (!isAvailable) {
+                isInitializing = false;
+                updateStatus("Stream offline - waiting for broadcast", "offline");
+                playButton.disabled = true;
+                retryInfo.textContent = `Checking again in ${RETRY_DELAY / 1000} seconds...`;
+                
+                // Retry after delay
+                retryTimer = setTimeout(() => {
+                    retryCount++;
+                    initializeStream();
+                }, RETRY_DELAY);
+                return;
             }
 
             if (Hls.isSupported()) {
@@ -110,57 +193,94 @@
                     debug: false,
                     enableWorker: true,
                     lowLatencyMode: true,
-                    backBufferLength: 30,
-                    maxBufferLength: 30,
-                    maxMaxBufferLength: 30,
-                    maxBufferSize: 60 * 1000 * 1000, // 60MB
+                    backBufferLength: 0, // Don't keep old segments
+                    maxBufferLength: 10,
+                    maxMaxBufferLength: 20,
+                    maxBufferSize: 30 * 1000 * 1000, // 30MB
                     maxBufferHole: 0.5,
-                    highBufferWatchdogPeriod: 2,
-                    nudgeMaxRetry: 5,
-                    nudgeOffset: 0.2,
                     manifestLoadingTimeOut: 10000,
-                    manifestLoadingMaxRetry: 1,
+                    manifestLoadingMaxRetry: 2,
+                    manifestLoadingRetryDelay: 1000,
                     levelLoadingTimeOut: 10000,
-                    levelLoadingMaxRetry: 3,
+                    levelLoadingMaxRetry: 2,
                     fragLoadingTimeOut: 20000,
-                    fragLoadingMaxRetry: 3,
+                    fragLoadingMaxRetry: 2,
                     startFragPrefetch: true,
                     testBandwidth: true,
                     progressive: true,
-                    liveSyncDurationCount: 3,
-                    liveMaxLatencyDurationCount: 10
+                    liveSyncDurationCount: 2,
+                    liveMaxLatencyDurationCount: 6,
+                    liveDurationInfinity: true,
+                    highBufferWatchdogPeriod: 1
                 });
 
-                hls.loadSource(hlsUrl);
+                // Add timestamp to prevent caching
+                const timestampedUrl = hlsUrl + '?t=' + Date.now();
+                hls.loadSource(timestampedUrl);
                 hls.attachMedia(video);
                 
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
                     isInitializing = false;
-                    status.textContent = "Stream ready - click to play";
+                    retryCount = 0;
+                    updateStatus("Stream online - click to play", "live");
                     playButton.disabled = false;
+                    retryInfo.textContent = '';
                     
                     // Try autoplay muted
                     video.muted = true;
                     video.play()
                         .then(() => {
-                            status.textContent = "Stream playing (muted)";
+                            updateStatus("Stream playing (muted)", "live");
                             playButton.textContent = "Unmute";
                         })
                         .catch(() => {
-                            status.textContent = "Click to play";
+                            updateStatus("Stream ready - click to play", "live");
                         });
                 });
 
                 hls.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS Error:', data);
+                    
                     if (data.fatal) {
                         isInitializing = false;
-                        status.textContent = "Stream not available";
-                        playButton.disabled = true;
                         
-                        setTimeout(() => {
-                            initializeStream();
-                        }, 5000);
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                updateStatus("Network error - retrying...", "loading");
+                                setTimeout(() => initializeStream(), 2000);
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                updateStatus("Media error - recovering...", "loading");
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                updateStatus("Stream error - retrying...", "offline");
+                                setTimeout(() => initializeStream(), 3000);
+                                break;
+                        }
                     }
+                });
+
+                // Monitor stream health
+                hls.on(Hls.Events.FRAG_LOADED, () => {
+                    // Stream is healthy, reset retry count
+                    if (retryCount > 0) {
+                        retryCount = 0;
+                        retryInfo.textContent = '';
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari native HLS support
+                video.src = hlsUrl + '?t=' + Date.now();
+                video.addEventListener('loadedmetadata', () => {
+                    isInitializing = false;
+                    updateStatus("Stream ready - click to play", "live");
+                    playButton.disabled = false;
+                });
+                video.addEventListener('error', () => {
+                    isInitializing = false;
+                    updateStatus("Stream not available", "offline");
+                    setTimeout(() => initializeStream(), 3000);
                 });
             }
         }
@@ -169,14 +289,14 @@
         playButton.addEventListener('click', () => {
             if (video.muted) {
                 video.muted = false;
-                status.textContent = "Stream playing";
+                updateStatus("Stream playing", "live");
                 playButton.style.display = 'none';
                 return;
             }
 
             video.play()
                 .then(() => {
-                    status.textContent = "Stream playing";
+                    updateStatus("Stream playing", "live");
                     playButton.style.display = 'none';
                 })
                 .catch(error => {
@@ -185,13 +305,28 @@
                     video.muted = true;
                     video.play()
                         .then(() => {
-                            status.textContent = "Stream playing (muted)";
+                            updateStatus("Stream playing (muted)", "live");
                             playButton.textContent = "Unmute";
                         })
                         .catch(() => {
-                            status.textContent = "Playback failed. Click to try again.";
+                            updateStatus("Playback failed. Click to try again.", "offline");
                         });
                 });
+        });
+
+        // Handle visibility change to pause/resume checking
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // Page is hidden, pause checking
+                if (retryTimer) {
+                    clearTimeout(retryTimer);
+                }
+            } else {
+                // Page is visible again, resume checking if needed
+                if (!hls && !isInitializing) {
+                    initializeStream();
+                }
+            }
         });
 
         // Disable right-click on video
@@ -199,6 +334,19 @@
 
         // Start streaming
         initializeStream();
+
+        // Periodic health check
+        checkInterval = setInterval(async () => {
+            if (!hls && !isInitializing) {
+                // No active stream, check if one became available
+                initializeStream();
+            }
+        }, 10000); // Check every 10 seconds
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            cleanupHLS();
+        });
     </script>
 </body>
 </html>
