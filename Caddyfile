@@ -1,0 +1,20 @@
+:8080 {
+	root * ./public
+	file_server
+
+	# HLS streaming headers
+	@hls path /hls/*
+	header @hls {
+		Cache-Control "no-cache, no-store, must-revalidate"
+		Access-Control-Allow-Origin "*"
+		Content-Type "application/vnd.apple.mpegurl"
+	}
+
+	# HLS segment headers  
+	@ts path /hls/*.ts
+	header @ts {
+		Cache-Control "no-cache"
+		Access-Control-Allow-Origin "*"
+		Content-Type "video/MP2T"
+	}
+}
