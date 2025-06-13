@@ -245,6 +245,22 @@ For technical issues:
 - **Node.js:** 14.0+
 - **Electron:** 35.0+
 
----
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Quick Start for Contributors
+1. Fork the repository
+2. Clone your fork: `git clone https://github.com/bephila/electron-campus-radio.git`
+3. Create a branch: `git checkout -b feature-name`
+4. Make your changes and test
+5. Submit a pull request
+
+Found a bug? Please [open an issue](../../issues).
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 🎵 **Happy Broadcasting with Cheers Campus Radio!** 🎵
