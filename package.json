@@ -31,25 +31,30 @@
     "ws": "^8.18.2"
   },
   "devDependencies": {
+    "concurrently": "^7.6.0",
     "electron": "^35.2.2",
-    "electron-builder": "^24.0.0",
-    "concurrently": "^7.6.0"
+    "electron-builder": "^24.0.0"
   },
   "build": {
     "appId": "com.cheers.campus-radio",
-    "productName": "Cheers Campus Radio",
+    "productName": "Cheers",
     "directories": {
       "output": "dist"
     },
     "files": [
       "src/**/*",
       "public/**/*",
+      "assets/**/*",
       "node_modules/**/*"
     ],
     "extraResources": [
       {
         "from": "ffmpeg-7.1.1/",
         "to": "ffmpeg-7.1.1/"
+      },
+      {
+        "from": "assets/",
+        "to": "assets/"
       }
     ],
     "win": {
@@ -57,11 +62,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "forceCodeSigning": false,
@@ -80,7 +89,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Cheers Campus Radio"
+      "shortcutName": "Cheers",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
     }
   }
 }

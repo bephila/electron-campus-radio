@@ -1,6 +1,83 @@
-// Complete rendered.js with Enhanced HLS Cleanup Integration and All Deck Functions
+NEW
 
-// Helper functions
+// Global Variables
+let playlistFiles = [];
+let currentIndex = -1;
+let audioVisualizerCanvas = null;
+let audioContext = null;
+let audioAnalyser = null;
+let audioSource = null;
+let isFading = false;
+let isScrubbing = false;
+
+// Enhanced streaming state with better isolation
+let isCurrentlyStreaming = false;
+let currentMediaRecorder = null;
+let currentWebSocket = null;
+let currentStream = null;
+let streamingContentType = null;
+let streamOperationId = 0;
+let activeOperationId = null;
+
+// Audio management tracking
+let connectedAudioElements = new Set();
+let currentAudioDestination = null;
+
+// FIXED: Stream restart capability
+let canRestartStream = true;
+let lastStreamContent = null;
+let isStreamRestarting = false;
+
+// MISSING: Add isolated stream pool
+let isolatedStreamPool = new Map();
+
+// Initialize completed operations tracking
+let completedOperations = new Set();
+
+// FIXED: Simplified operation management
+function startOperation(operationType = 'unknown') {
+  streamOperationId++;
+  
+  // Cancel previous operation if not completed
+  if (activeOperationId !== null && !completedOperations.has(activeOperationId)) {
+    console.log(`Cancelling operation #${activeOperationId} for new ${operationType} operation #${streamOperationId}`);
+  }
+  
+  activeOperationId = streamOperationId;
+  console.log(`Starting operation #${activeOperationId} (${operationType})`);
+  return activeOperationId;
+}
+
+function isValidOperation(operationId) {
+  if (completedOperations.has(operationId)) {
+    return true;
+  }
+  
+  const valid = activeOperationId === operationId;
+  if (!valid && Math.abs(activeOperationId - operationId) > 1) {
+    console.log(`Operation #${operationId} cancelled (current: #${activeOperationId})`);
+  }
+  
+  return valid;
+}
+
+function endOperation(operationId) {
+  if (activeOperationId === operationId) {
+    completedOperations.add(operationId);
+    if (!isCurrentlyStreaming) {
+      activeOperationId = null;
+    }
+    console.log(`Completed operation #${operationId}`);
+    
+    // Clean up old completed operations
+    if (completedOperations.size > 5) {
+      const oldestOperations = Array.from(completedOperations).slice(0, completedOperations.size - 5);
+      oldestOperations.forEach(op => completedOperations.delete(op));
+    }
+  }
+}
+
+// Helper Functions
 function updateLiveStatus(status) {
   const liveStatus = document.getElementById("live-status");
   if (liveStatus) {
@@ -16,84 +93,264 @@ function updateLiveStatus(status) {
   }
 }
 
-// Audio Visualizer for Live Monitor
-let audioVisualizerCanvas = null;
-let audioContext = null;
-let audioAnalyser = null;
-let audioSource = null;
-
-function stopAudioVisualization() {
-  if (audioSource) {
-    audioSource.disconnect();
-    audioSource = null;
-  }
-  
-  if (audioAnalyser) {
-    audioAnalyser.disconnect();
-    audioAnalyser = null;
+// MISSING: Add WAMP status check function
+async function checkWAMPStatus() {
+  try {
+    const response = await fetch('http://localhost/', { 
+      method: 'HEAD',
+      cache: 'no-cache'
+    });
+    
+    if (!response.ok) {
+      throw new Error('WAMP server not responding');
+    }
+    
+    console.log('WAMP server status: OK');
+    return true;
+  } catch (error) {
+    console.error('WAMP server check failed:', error);
+    return false;
   }
 }
 
+// MISSING: Add fallback stream creation function
+function createFallbackStream() {
+  console.log("Creating fallback stream for empty monitor");
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = 1280;
+  canvas.height = 720;
+  const ctx = canvas.getContext('2d');
+  
+  // Create animated fallback content
+  let animationFrame = 0;
+  
+  function drawFallback() {
+    // Gradient background
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#1a1a2e');
+    gradient.addColorStop(0.5, '#16213e');
+    gradient.addColorStop(1, '#0f3460');
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Animated title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 64px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎵 Cheers Campus Radio', canvas.width/2, canvas.height/2 - 50);
+    
+    // Animated subtitle
+    const alpha = (Math.sin(animationFrame * 0.1) + 1) / 2;
+    ctx.fillStyle = `rgba(255, 183, 36, ${alpha})`;
+    ctx.font = '32px Arial';
+    ctx.fillText('Live Stream Ready', canvas.width/2, canvas.height/2 + 20);
+    
+    // Status indicator
+    ctx.fillStyle = '#4CAF50';
+    ctx.font = '24px Arial';
+    ctx.fillText('• ONLINE', canvas.width/2, canvas.height/2 + 80);
+    
+    animationFrame++;
+    
+    if (animationFrame < 1000) { // Limit animation frames
+      requestAnimationFrame(drawFallback);
+    }
+  }
+  
+  drawFallback();
+  
+  const stream = canvas.captureStream(30);
+  stream.streamId = `fallback-${Date.now()}`;
+  
+  return stream;
+}
+
+// FIXED: Smoother content replacement without stream disruption
+function confirmAndReplaceLiveMonitor(action, contentType = 'unknown') {
+  const lm = document.getElementById("liveMonitor");
+  const deckA = document.getElementById("deckA");
+  
+  // FIXED: If streaming, switch content smoothly without user prompts
+  if (isCurrentlyStreaming) {
+    console.log(`Currently streaming - switching to ${contentType} content smoothly`);
+    action();
+    return;
+  }
+  
+  // Video always takes priority for new streams
+  if (contentType === 'video') {
+    console.log("Video content - taking priority");
+    
+    // Clear audio from deck A if not streaming
+    if (deckA && deckA.dataset.fileType === 'audio') {
+      deckA.pause();
+      deckA.src = '';
+      deckA.dataset.fileType = '';
+      deckA.dataset.fileName = '';
+      cleanupAudioConnections();
+    }
+    
+    action();
+    return;
+  }
+  
+  const hasSomethingPlaying = (lm.srcObject && lm.srcObject.getTracks().length > 0) || !!lm.currentSrc;
+  
+  if (hasSomethingPlaying && !confirm("There is currently media playing, would you like to continue?")) {
+    return;
+  }
+  action();    
+}
+
+// FIXED: Complete cleanup function
+function cleanupAudioConnections() {
+  console.log("Cleaning up all audio connections...");
+  
+  connectedAudioElements.forEach(element => {
+    if (element.audioSourceNode) {
+      try {
+        element.audioSourceNode.disconnect();
+        delete element.audioSourceNode;
+        delete element.audioSourceConnected;
+      } catch (error) {
+        console.warn("Error disconnecting audio source:", error);
+      }
+    }
+  });
+  
+  connectedAudioElements.clear();
+  
+  if (currentAudioDestination) {
+    try {
+      currentAudioDestination.disconnect();
+      currentAudioDestination = null;
+    } catch (error) {
+      console.warn("Error disconnecting audio destination:", error);
+    }
+  }
+  
+  if (audioSource) {
+    try {
+      audioSource.disconnect();
+      audioSource = null;
+    } catch (error) {
+      console.warn("Error disconnecting main audio source:", error);
+    }
+  }
+}
+
+function stopAudioVisualization() {
+  cleanupAudioConnections();
+  
+  if (audioAnalyser) {
+    try {
+      audioAnalyser.disconnect();
+      audioAnalyser = null;
+    } catch (error) {
+      console.warn("Error disconnecting analyser:", error);
+    }
+  }
+}
+
+// FIXED: Robust audio stream setup with reuse protection
 function setupAudioStreamCapture(audioElement) {
   const liveMonitor = document.getElementById("liveMonitor");
   
-  // Clean up any existing content
-  cleanupAudioVisualization();
+  // FIXED: Check if this audio element is already connected
+  if (audioElement.audioSourceNode && audioElement.audioSourceConnected) {
+    console.log("Audio element already connected, reusing existing setup");
+    
+    // Ensure live monitor is set up correctly with existing connection
+    liveMonitor.src = "icons/soundwave.mp4";
+    liveMonitor.loop = true;
+    liveMonitor.muted = true;
+    liveMonitor.play();
+    
+    // Return existing stream if available
+    if (currentAudioDestination && currentAudioDestination.stream) {
+      return currentAudioDestination.stream;
+    }
+  }
   
-  // Set the soundwave video as source
+  // Only clean up if we're setting up a new connection
+  if (!audioElement.audioSourceNode) {
+    cleanupAudioConnections();
+  }
+  
   liveMonitor.src = "icons/soundwave.mp4";
   liveMonitor.loop = true;
-  liveMonitor.muted = true; // Video is muted, audio comes from deckA
+  liveMonitor.muted = true;
   liveMonitor.play();
   
-  // Create audio context for streaming
-  if (!audioContext) {
+  if (!audioContext || audioContext.state === 'closed') {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
   }
   
   try {
-    // Create audio source from deckA
-    const source = audioContext.createMediaElementSource(audioElement);
-    const destination = audioContext.createMediaStreamDestination();
+    const timestamp = Date.now();
     
-    // Connect audio to both speakers and destination
-    source.connect(audioContext.destination);
-    source.connect(destination);
+    // FIXED: Only create new MediaElementSource if not already connected
+    let source = audioElement.audioSourceNode;
+    if (!source) {
+      source = audioContext.createMediaElementSource(audioElement);
+      audioElement.audioSourceNode = source;
+      audioElement.audioSourceConnected = timestamp;
+      connectedAudioElements.add(audioElement);
+      audioSource = source;
+    }
     
-    // Wait for video to load, then get its stream
+    // FIXED: Only create new destination if needed
+    let destination = currentAudioDestination;
+    if (!destination) {
+      destination = audioContext.createMediaStreamDestination();
+      destination.stream.streamId = `audio-${timestamp}`;
+      currentAudioDestination = destination;
+      
+      // Connect the audio path
+      source.connect(audioContext.destination);
+      source.connect(destination);
+    }
+    
     liveMonitor.addEventListener('loadeddata', () => {
       try {
-        // Get video stream from live monitor
         const videoStream = liveMonitor.captureStream(30);
+        videoStream.streamId = `video-${timestamp}`;
         
-        // Combine video and audio streams
-        const combinedStream = new MediaStream([
-          ...videoStream.getVideoTracks(),
-          ...destination.stream.getAudioTracks()
-        ]);
+        const combinedStream = new MediaStream();
+        combinedStream.streamId = `combined-${timestamp}`;
         
-        // Store reference to the combined stream for capture
+        videoStream.getVideoTracks().forEach(track => {
+          track.id = `video-track-${timestamp}-${Math.random()}`;
+          combinedStream.addTrack(track);
+        });
+        
+        destination.stream.getAudioTracks().forEach(track => {
+          track.id = `audio-track-${timestamp}-${Math.random()}`;
+          combinedStream.addTrack(track);
+        });
+        
         liveMonitor.combinedStream = combinedStream;
-        
-        console.log("Soundwave video with audio stream ready");
+        console.log(`Audio+video stream ready: ${combinedStream.streamId}`);
       } catch (error) {
         console.error("Error creating combined stream:", error);
       }
     }, { once: true });
     
-    return destination.stream; // Return just audio for now
+    return destination.stream;
   } catch (error) {
     console.error("Error setting up audio stream capture:", error);
     return null;
   }
 }
 
+// FIXED: Better stream cleanup
 function cleanupAudioVisualization() {
   stopAudioVisualization();
   
   const liveMonitor = document.getElementById("liveMonitor");
   
-  // Remove any video source and stop streams
   if (liveMonitor.srcObject) {
     liveMonitor.srcObject.getTracks().forEach(track => track.stop());
     liveMonitor.srcObject = null;
@@ -103,40 +360,55 @@ function cleanupAudioVisualization() {
   liveMonitor.loop = false;
   liveMonitor.pause();
   
-  // Remove canvas if it exists
   if (audioVisualizerCanvas && audioVisualizerCanvas.parentElement) {
     audioVisualizerCanvas.parentElement.removeChild(audioVisualizerCanvas);
     audioVisualizerCanvas = null;
   }
+  
+  if (liveMonitor.combinedStream) {
+    liveMonitor.combinedStream.getTracks().forEach(track => track.stop());
+    delete liveMonitor.combinedStream;
+  }
 }
 
-function confirmAndReplaceLiveMonitor(action) {
-  const lm = document.getElementById("liveMonitor");
-  const hasSomethingPlaying =
-    (lm.srcObject && lm.srcObject.getTracks().length > 0) ||
-    !!lm.currentSrc;
+// FIXED: Simple, reliable stream creation
+function createStableStream(baseStream, contentType) {
+  const timestamp = Date.now();
+  const streamId = `stable-${contentType}-${timestamp}`;
   
-  // If there's a live stream, don't show confirmation
-  if (hasSomethingPlaying && lm.srcObject && lm.srcObject.getTracks().length > 0) {
-    // If it's a live camera stream, just execute the action
-    action();
-    return;
+  console.log(`Creating stable stream: ${streamId}`);
+  
+  if (!baseStream || !baseStream.getTracks) {
+    console.error("Invalid base stream provided");
+    return null;
   }
   
-  // For other media (videos, audio), show confirmation
-  if (hasSomethingPlaying && !confirm("There is currently a media playing, would you like to continue?")) {
-    return;
+  try {
+    // Clone all tracks from base stream
+    const clonedTracks = baseStream.getTracks().map((track, index) => {
+      const clonedTrack = track.clone();
+      clonedTrack.id = `${streamId}-${index}`;
+      return clonedTrack;
+    });
+    
+    // Create new MediaStream with cloned tracks
+    const stableStream = new MediaStream(clonedTracks);
+    stableStream.streamId = streamId;
+    
+    console.log(`Created stable stream ${streamId} with ${clonedTracks.length} tracks`);
+    return stableStream;
+  } catch (error) {
+    console.error("Error creating stable stream:", error);
+    return null;
   }
-  action();    
 }
 
-// Add this function before the DOMContentLoaded event listener
+// Device Management Functions
 async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const videoInputs = devices.filter(device => device.kind === 'videoinput');
     
-    // Try to find an exact match first
     const exactMatch = videoInputs.find(device => 
       device.label === ffmpegDeviceName || 
       device.label.includes(ffmpegDeviceName)
@@ -146,7 +418,6 @@ async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
       return exactMatch.deviceId;
     }
     
-    // If no exact match, try to find a partial match
     const partialMatch = videoInputs.find(device => 
       ffmpegDeviceName.includes(device.label) ||
       device.label.toLowerCase().includes(ffmpegDeviceName.toLowerCase())
@@ -156,7 +427,6 @@ async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
       return partialMatch.deviceId;
     }
     
-    // If still no match, return the first available video input
     if (videoInputs.length > 0) {
       console.warn(`No exact match found for ${ffmpegDeviceName}, using first available camera`);
       return videoInputs[0].deviceId;
@@ -169,54 +439,7 @@ async function getBrowserDeviceIdForFFmpegName(ffmpegDeviceName) {
   }
 }
 
-function ensureAudioInStream(originalStream) {
-  const deckA = document.getElementById("deckA");
-  
-  // Fix: Clear existing audio context connections
-  if (audioSource) {
-    try {
-      audioSource.disconnect();
-      audioSource = null;
-    } catch (e) {
-      console.log("Audio source already disconnected");
-    }
-  }
-  
-  // If deckA is playing audio and we have an audio context
-  if (deckA && !deckA.paused && deckA.dataset.fileType === "audio" && audioContext) {
-    try {
-      // Create a new destination for the combined stream
-      const destination = audioContext.createMediaStreamDestination();
-      
-      // Add video tracks from original stream if any
-      originalStream.getVideoTracks().forEach(track => {
-        destination.stream.addTrack(track);
-      });
-      
-      // Connect deckA audio to the destination
-      const source = audioContext.createMediaElementSource(deckA);
-      source.connect(destination);
-      source.connect(audioContext.destination); // Also play to speakers
-      
-      // Store the new source reference
-      audioSource = source;
-      
-      return destination.stream;
-    } catch (error) {
-      console.error("Error ensuring audio in stream:", error);
-      return originalStream;
-    }
-  }
-  
-  return originalStream;
-}
-
-// Global streaming state variables  
-let isCurrentlyStreaming = false;
-let currentMediaRecorder = null;
-let currentWebSocket = null;
-
-// Helper function to get supported MIME type
+// FIXED: Robust streaming functions
 function getSupportedMimeType() {
   const types = [
     'video/webm;codecs=vp8,opus',
@@ -235,179 +458,340 @@ function getSupportedMimeType() {
   return null;
 }
 
-// Helper function for handling stream errors with HLS cleanup
-async function handleStreamError(errorMessage) {
+// FIXED: Complete audio system reset for recovery
+function resetAudioSystem() {
+  console.log("Performing complete audio system reset...");
+  
+  // Stop all audio tracks first
+  connectedAudioElements.forEach(element => {
+    if (element.audioSourceNode) {
+      try {
+        element.audioSourceNode.disconnect();
+      } catch (error) {
+        console.warn("Error disconnecting during reset:", error);
+      }
+      delete element.audioSourceNode;
+      delete element.audioSourceConnected;
+    }
+  });
+  
+  connectedAudioElements.clear();
+  
+  // Disconnect all audio nodes
+  if (currentAudioDestination) {
+    try {
+      currentAudioDestination.disconnect();
+    } catch (error) {
+      console.warn("Error disconnecting destination during reset:", error);
+    }
+    currentAudioDestination = null;
+  }
+  
+  if (audioSource) {
+    try {
+      audioSource.disconnect();
+    } catch (error) {
+      console.warn("Error disconnecting source during reset:", error);
+    }
+    audioSource = null;
+  }
+  
+  // Close and recreate audio context
+  if (audioContext && audioContext.state !== 'closed') {
+    try {
+      audioContext.close();
+    } catch (error) {
+      console.warn("Error closing audio context during reset:", error);
+    }
+  }
+  
+  audioContext = null;
+  
+  console.log("Audio system reset complete");
+}
+
+// FIXED: Enhanced error handling with audio system reset
+async function handleStreamError(errorMessage, operationId = null) {
   console.error('Stream error:', errorMessage);
   
-  // Clean up MediaRecorder
-  if (currentMediaRecorder && currentMediaRecorder.state !== "inactive") {
-    try {
-      currentMediaRecorder.stop();
-    } catch (e) {
-      console.error('Error stopping MediaRecorder during error handling:', e);
-    }
-    currentMediaRecorder = null;
-  }
-  
-  // Clean up WebSocket
-  if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-    try {
-      currentWebSocket.close();
-    } catch (e) {
-      console.error('Error closing WebSocket during error handling:', e);
-    }
-    currentWebSocket = null;
-  }
-  
-  // Update status
-  isCurrentlyStreaming = false;
-  updateLiveStatus(false);
-  
-  // Stop HLS cleanup and clean remaining files
-  if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
-    try {
-      console.log("Stopping HLS cleanup due to error...");
-      await window.electronAPI.stopHLSCleanup();
-    } catch (error) {
-      console.warn("Could not stop HLS cleanup during error handling:", error);
-    }
-  }
-  
-  alert(errorMessage);
-}
-
-// Function to restart streaming with new stream
-function restartStreamingWithNewSource(newStream) {
-  if (!isCurrentlyStreaming) return;
-  
-  console.log("Restarting streaming with new source...");
-  
-  // Stop current MediaRecorder if active with proper cleanup
-  if (currentMediaRecorder) {
-    return new Promise((resolve) => {
-      if (currentMediaRecorder.state === "recording") {
-        currentMediaRecorder.addEventListener('stop', () => {
-          console.log("Old MediaRecorder stopped, starting new one...");
-          startNewMediaRecorder(newStream);
-          resolve();
-        }, { once: true });
-        
-        try {
-          currentMediaRecorder.stop();
-        } catch (error) {
-          console.error('Error stopping MediaRecorder:', error);
-          startNewMediaRecorder(newStream);
-          resolve();
-        }
-      } else {
-        startNewMediaRecorder(newStream);
-        resolve();
-      }
-    });
-  } else {
-    startNewMediaRecorder(newStream);
-  }
-}
-
-function startNewMediaRecorder(stream) {
-  // Wait a bit to ensure the old recorder is fully cleaned up
-  setTimeout(() => {
-    if (!currentWebSocket || currentWebSocket.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket not available for restart");
-      return;
-    }
-
-    try {
-      const mimeType = getSupportedMimeType();
-      if (!mimeType) {
-        console.error("No supported MIME types found");
-        return;
-      }
-
-      // Verify the stream has active tracks
-      const videoTracks = stream.getVideoTracks();
-      const audioTracks = stream.getAudioTracks();
-      
-      if (videoTracks.length === 0 && audioTracks.length === 0) {
-        console.error("No active tracks in stream");
-        return;
-      }
-
-      // Check if tracks are actually active (not ended)
-      const activeVideoTracks = videoTracks.filter(track => track.readyState === 'live');
-      const activeAudioTracks = audioTracks.filter(track => track.readyState === 'live');
-      
-      console.log(`Starting new MediaRecorder with ${activeVideoTracks.length} active video tracks and ${activeAudioTracks.length} active audio tracks`);
-
-      if (activeVideoTracks.length === 0 && activeAudioTracks.length === 0) {
-        console.error("No active (live) tracks in stream");
-        return;
-      }
-
-      currentMediaRecorder = new MediaRecorder(stream, { 
-        mimeType: mimeType,
-        videoBitsPerSecond: 2500000,
-        audioBitsPerSecond: 192000
-      });
-      
-      currentMediaRecorder.ondataavailable = e => {
-        if (e.data.size > 0 && currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-          try {
-            currentWebSocket.send(e.data);
-            // Log successful data transmission occasionally
-            if (Math.random() < 0.01) { // 1% of the time
-              console.log(`Sent ${e.data.size} bytes to WebSocket`);
-            }
-          } catch (error) {
-            console.error('Error sending data to WebSocket:', error);
-          }
-        } else if (e.data.size === 0) {
-          console.warn('MediaRecorder produced empty data chunk');
-        }
-      };
-
-      currentMediaRecorder.onerror = async (event) => {
-        console.error('MediaRecorder error during restart:', event);
-        await handleStreamError('MediaRecorder error: ' + (event.error || 'Unknown error'));
-      };
-
-      currentMediaRecorder.onstart = () => {
-        console.log("New MediaRecorder started successfully");
-        // Verify it's actually recording
-        setTimeout(() => {
-          if (currentMediaRecorder && currentMediaRecorder.state === 'recording') {
-            console.log("MediaRecorder confirmed to be recording");
-          } else {
-            console.error("MediaRecorder failed to maintain recording state");
-          }
-        }, 1000);
-      };
-
-      currentMediaRecorder.onstop = () => {
-        console.log("MediaRecorder stopped");
-      };
-      
-      currentMediaRecorder.start(500);
-      console.log("MediaRecorder restart initiated");
-      
-    } catch (error) {
-      console.error('Error creating new MediaRecorder:', error);
-      handleStreamError('Error creating new MediaRecorder: ' + error.message);
-    }
-  }, 200); // Increased delay to ensure proper cleanup
-}
-
-// When the user clicks "Go Live" on a camera, show its stream in the live monitor.
-window.goLive = async function(cameraId) {
-  const camEl = document.getElementById(cameraId);
-  if (!camEl) {
-    console.error(`Camera element ${cameraId} not found`);
+  if (operationId && !isValidOperation(operationId)) {
+    console.log(`Ignoring error cleanup for cancelled operation #${operationId}`);
     return;
   }
   
+  const cleanupOperationId = startOperation('error-cleanup');
+  
+  try {
+    // Set restart capability
+    canRestartStream = true;
+    
+    // Complete MediaRecorder cleanup
+    if (currentMediaRecorder) {
+      try {
+        if (currentMediaRecorder.state === "recording") {
+          currentMediaRecorder.stop();
+        }
+      } catch (e) {
+        console.error('Error stopping MediaRecorder during error handling:', e);
+      }
+      currentMediaRecorder = null;
+    }
+    
+    // Complete WebSocket cleanup
+    if (currentWebSocket) {
+      try {
+        if (currentWebSocket.readyState === WebSocket.OPEN) {
+          currentWebSocket.close();
+        }
+      } catch (e) {
+        console.error('Error closing WebSocket during error handling:', e);
+      }
+      currentWebSocket = null;
+    }
+    
+    // Complete stream cleanup
+    if (currentStream) {
+      try {
+        currentStream.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        console.error('Error stopping stream tracks:', e);
+      }
+      currentStream = null;
+    }
+    
+    // Clean isolated stream pool
+    isolatedStreamPool.forEach((stream, id) => {
+      try {
+        stream.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        console.warn(`Error cleaning isolated stream ${id}:`, e);
+      }
+    });
+    isolatedStreamPool.clear();
+    
+    // FIXED: Reset audio system if error involves audio
+    if (errorMessage.includes('audio') || errorMessage.includes('MediaElementSource')) {
+      resetAudioSystem();
+    }
+    
+    isCurrentlyStreaming = false;
+    isStreamRestarting = false;
+    streamingContentType = null;
+    updateLiveStatus(false);
+    
+    // HLS cleanup
+    if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
+      try {
+        console.log("Stopping HLS cleanup due to error...");
+        await window.electronAPI.stopHLSCleanup();
+      } catch (error) {
+        console.warn("Could not stop HLS cleanup during error handling:", error);
+      }
+    }
+    
+  } finally {
+    endOperation(cleanupOperationId);
+  }
+}
+
+async function switchStreamContent(newBaseStream, contentType) {
+  if (!isCurrentlyStreaming || !currentMediaRecorder || !currentWebSocket) {
+    console.log("Not streaming or missing components, ignoring content switch");
+    return;
+  }
+  
+  console.log(`Switching to ${contentType} content while maintaining stream...`);
+  
+  try {
+    // Don't stop MediaRecorder - just change the stream
+    const mimeType = getSupportedMimeType();
+    if (!mimeType) return;
+    
+    // Stop old MediaRecorder
+    if (currentMediaRecorder.state === "recording") {
+      currentMediaRecorder.stop();
+    }
+    
+    // Wait briefly for stop
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Create new MediaRecorder with new content
+    currentMediaRecorder = new MediaRecorder(newBaseStream, { 
+      mimeType: mimeType,
+      videoBitsPerSecond: 500000,
+      audioBitsPerSecond: 64000
+    });
+    
+    currentMediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0 && currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
+        currentWebSocket.send(e.data);
+      }
+    };
+    
+    currentMediaRecorder.onerror = async (event) => {
+      console.error("MediaRecorder error during switch:", event);
+    };
+    
+    // Start new recording
+    currentMediaRecorder.start(500);
+    console.log(`✅ Stream content switched to ${contentType}`);
+    
+  } catch (error) {
+    console.error("Error switching content:", error);
+  }
+}
+
+// FIXED: Enhanced new stream initialization
+async function startNewStream(baseStream, contentType, operationId = null) {
+  if (!operationId) {
+    operationId = startOperation(`start-${contentType}`);
+  }
+  
+  if (isStreamRestarting) {
+    console.log("Stream restart already in progress");
+    return;
+  }
+  
+  try {
+    console.log(`[#${operationId}] Starting new ${contentType} stream...`);
+    isStreamRestarting = true;
+    
+    // Store content for restart capability
+    lastStreamContent = { stream: baseStream, type: contentType };
+    
+    // Create stable stream
+    currentStream = createStableStream(baseStream, contentType);
+    if (!currentStream) {
+      throw new Error("Failed to create stable stream");
+    }
+    
+    streamingContentType = contentType;
+    
+    // Create WebSocket connection
+    currentWebSocket = new WebSocket("ws://localhost:9999");
+    
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("WebSocket connection timeout"));
+      }, 5000);
+
+      currentWebSocket.addEventListener("open", () => {
+        clearTimeout(timeout);
+        console.log(`[#${operationId}] WebSocket connected`);
+        resolve();
+      });
+
+      currentWebSocket.addEventListener("error", (error) => {
+        clearTimeout(timeout);
+        reject(new Error("WebSocket connection failed"));
+      });
+    });
+
+    if (!isValidOperation(operationId)) return;
+
+    // Create MediaRecorder
+    const mimeType = getSupportedMimeType();
+    if (!mimeType) {
+      throw new Error("No supported MIME types found");
+    }
+
+    currentMediaRecorder = new MediaRecorder(currentStream, { 
+      mimeType: mimeType,
+      videoBitsPerSecond: 500000,
+      audioBitsPerSecond: 64000
+    });
+    
+    currentMediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0 && currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN && isValidOperation(operationId)) {
+        try {
+          currentWebSocket.send(e.data);
+        } catch (error) {
+          console.error(`[#${operationId}] Error sending data:`, error);
+        }
+      }
+    };
+
+    currentMediaRecorder.onerror = async (event) => {
+      console.error(`[#${operationId}] MediaRecorder error:`, event);
+      await handleStreamError('MediaRecorder error: ' + (event.error || 'Unknown error'), operationId);
+    };
+    
+    currentMediaRecorder.onstart = () => {
+      if (isValidOperation(operationId)) {
+        console.log(`[#${operationId}] New ${contentType} stream started successfully`);
+        isCurrentlyStreaming = true;
+        isStreamRestarting = false;
+        updateLiveStatus(true);
+      }
+    };
+
+    currentMediaRecorder.onstop = () => {
+      console.log(`[#${operationId}] MediaRecorder stopped`);
+      if (isCurrentlyStreaming && isValidOperation(operationId)) {
+        isCurrentlyStreaming = false;
+        updateLiveStatus(false);
+      }
+    };
+
+    // Set up WebSocket error handlers
+    currentWebSocket.onerror = async (error) => {
+      console.error(`[#${operationId}] WebSocket error:`, error);
+      await handleStreamError('WebSocket error occurred', operationId);
+    };
+
+    currentWebSocket.onclose = async (event) => {
+      if (isCurrentlyStreaming && isValidOperation(operationId)) {
+        console.warn(`[#${operationId}] WebSocket closed unexpectedly:`, event);
+        await handleStreamError('WebSocket connection lost', operationId);
+      }
+    };
+    
+    if (isValidOperation(operationId)) {
+      currentMediaRecorder.start(500);
+      console.log(`[#${operationId}] New stream started successfully!`);
+    }
+
+  } catch (error) {
+    console.error(`[#${operationId}] Error starting new stream:`, error);
+    isStreamRestarting = false;
+    await handleStreamError("Failed to start stream: " + error.message, operationId);
+  } finally {
+    endOperation(operationId);
+    isStreamRestarting = false;
+  }
+}
+
+// FIXED: Restart stream capability
+async function restartStream() {
+  if (!canRestartStream || !lastStreamContent) {
+    console.log("Cannot restart stream - no previous content available");
+    return false;
+  }
+  
+  if (isCurrentlyStreaming || isStreamRestarting) {
+    console.log("Cannot restart - stream is already active or restarting");
+    return false;
+  }
+  
+  console.log("Restarting stream with last content...");
+  
+  try {
+    await startNewStream(lastStreamContent.stream, lastStreamContent.type);
+    return true;
+  } catch (error) {
+    console.error("Failed to restart stream:", error);
+    return false;
+  }
+}
+
+// Camera Functions
+window.goLive = async function(cameraId) {
+  const camEl = document.getElementById(cameraId);
   console.log("Audio ID on cam:", camEl.dataset.audioDeviceId);
 
-  if (!confirm(`Do you want to add camera ${cameraId} to the live monitor feed?`)) {
+  if (isCurrentlyStreaming) {
+    console.log("Already streaming, switching to camera feed...");
+  } else if (!confirm(`Do you want to add camera ${cameraId} to the live monitor feed?`)) {
     return;
   }
 
@@ -422,33 +806,30 @@ window.goLive = async function(cameraId) {
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Stop previous streams
       if (camEl.srcObject) {
         camEl.srcObject.getTracks().forEach(track => track.stop());
       }
-      if (liveMonitor && liveMonitor.srcObject) {
+      if (liveMonitor.srcObject) {
         liveMonitor.srcObject.getTracks().forEach(track => track.stop());
       }
 
       camEl.srcObject = stream;
       camEl.play();
 
-      if (liveMonitor) {
-        liveMonitor.srcObject = stream;
-        liveMonitor.play();
-      }
+      liveMonitor.srcObject = stream;
+      liveMonitor.play();
       
-      // If streaming is active, restart with new stream
-      if (isCurrentlyStreaming && liveMonitor && liveMonitor.captureStream) {
-        console.log("Restarting stream with new camera source");
+      // Enhanced content switching if already streaming
+      if (isCurrentlyStreaming) {
+        console.log("Switching to camera content...");
         setTimeout(() => {
           try {
             const captureStream = liveMonitor.captureStream(30);
-            restartStreamingWithNewSource(captureStream);
+            switchStreamContent(captureStream, 'camera');
           } catch (error) {
-            console.error("Error restarting stream:", error);
+            console.error("Error switching to camera:", error);
           }
-        }, 200);
+        }, 500);
       }
       
       console.log(`Camera ${cameraId} is now live in monitor with audio:`, !!constraints.audio);
@@ -456,75 +837,28 @@ window.goLive = async function(cameraId) {
       console.error('Error starting camera stream:', error);
       alert('Failed to start camera stream: ' + error.message);
     }
-  });
+  }, 'camera');
 };
 
-// Stop a camera stream with HLS cleanup
 window.stopLive = async function(cameraId) {
   const videoElement = document.getElementById(cameraId);
   const liveMonitor = document.getElementById("liveMonitor");
   
-  if (videoElement && videoElement.srcObject) {
+  if (videoElement.srcObject) {
     videoElement.srcObject.getTracks().forEach(track => track.stop());
     videoElement.srcObject = null;
     videoElement.dataset.ready = "false";
   }
   
-  if (liveMonitor && liveMonitor.srcObject) {
+  if (liveMonitor.srcObject) {
     liveMonitor.srcObject.getTracks().forEach(track => track.stop());
     liveMonitor.srcObject = null;
     liveMonitor.pause();
   }
 
-  // Stop streaming if active
   if (isCurrentlyStreaming) {
     console.log("Stopping streaming due to camera stop...");
-    
-    if (currentMediaRecorder && currentMediaRecorder.state !== "inactive") {
-      try {
-        currentMediaRecorder.stop();
-      } catch (error) {
-        console.error('Error stopping MediaRecorder:', error);
-      }
-      currentMediaRecorder = null;
-    }
-    
-    if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-      try {
-        currentWebSocket.close();
-      } catch (error) {
-        console.error('Error closing WebSocket:', error);
-      }
-      currentWebSocket = null;
-    }
-    
-    isCurrentlyStreaming = false;
-    updateLiveStatus(false);
-    
-    // Stop HLS cleanup monitoring
-    if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
-      try {
-        console.log("Stopping HLS cleanup due to camera stop...");
-        await window.electronAPI.stopHLSCleanup();
-      } catch (error) {
-        console.warn("Could not stop HLS cleanup:", error);
-      }
-    }
-
-    // Force cleanup HLS files after a short delay
-    setTimeout(async () => {
-      if (window.electronAPI && window.electronAPI.forceHLSCleanup) {
-        try {
-          console.log("Force cleaning HLS files after camera stop...");
-          const result = await window.electronAPI.forceHLSCleanup();
-          if (result.success) {
-            console.log(`Cleaned ${result.filesRemoved} HLS files after camera stop`);
-          }
-        } catch (error) {
-          console.warn("Could not force cleanup HLS files:", error);
-        }
-      }
-    }, 2000); // 2 second delay
+    await stopCurrentStream();
   }
   
   if (window.electronAPI && window.electronAPI.stopFFmpeg) {
@@ -534,7 +868,489 @@ window.stopLive = async function(cameraId) {
   console.log(`Camera ${cameraId} stopped.`);
 };
 
-// Show the settings dropdown for selecting a camera for a preview.
+// Enhanced stream stopping
+async function stopCurrentStream() {
+  const operationId = startOperation('stop-stream');
+  
+  try {
+    console.log(`[#${operationId}] Stopping current stream...`);
+    
+    // Reset restart capability
+    canRestartStream = false;
+    lastStreamContent = null;
+    
+    // Stop MediaRecorder
+    if (currentMediaRecorder && currentMediaRecorder.state !== "inactive") {
+      try {
+        await new Promise((resolve) => {
+          currentMediaRecorder.addEventListener('stop', resolve, { once: true });
+          currentMediaRecorder.stop();
+        });
+      } catch (error) {
+        console.error(`[#${operationId}] Error stopping MediaRecorder:`, error);
+      }
+      currentMediaRecorder = null;
+    }
+    
+    // Close WebSocket
+    if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
+      try {
+        currentWebSocket.close();
+      } catch (error) {
+        console.error(`[#${operationId}] Error closing WebSocket:`, error);
+      }
+      currentWebSocket = null;
+    }
+    
+    // Stop stream tracks
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+      currentStream = null;
+    }
+    
+    // Clean isolated stream pool
+    isolatedStreamPool.forEach((stream, id) => {
+      try {
+        stream.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        console.warn(`Error cleaning isolated stream ${id}:`, e);
+      }
+    });
+    isolatedStreamPool.clear();
+    
+    isCurrentlyStreaming = false;
+    isStreamRestarting = false;
+    streamingContentType = null;
+    updateLiveStatus(false);
+    
+    // Clean up audio connections
+    cleanupAudioConnections();
+    
+    // HLS cleanup
+    if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
+      try {
+        await window.electronAPI.stopHLSCleanup();
+      } catch (error) {
+        console.warn(`[#${operationId}] Could not stop HLS cleanup:`, error);
+      }
+    }
+
+    setTimeout(async () => {
+      if (window.electronAPI && window.electronAPI.forceHLSCleanup) {
+        try {
+          const result = await window.electronAPI.forceHLSCleanup();
+          if (result.success) {
+            console.log(`[#${operationId}] Cleaned ${result.filesRemoved} HLS files after stream stop`);
+          }
+        } catch (error) {
+          console.warn(`[#${operationId}] Could not force cleanup HLS files:`, error);
+        }
+      }
+    }, 2000);
+    
+  } finally {
+    endOperation(operationId);
+  }
+}
+
+// FIXED: Enhanced media display function with better live monitor sync
+function showFile(url) {
+  const lm = document.getElementById("liveMonitor");
+  
+  if (lm.srcObject) {
+    lm.srcObject.getTracks().forEach(t => t.stop());
+    lm.srcObject = null;
+  }
+  
+  lm.pause();
+  lm.removeAttribute("srcObject");
+  lm.src = url;
+  
+  // FIXED: Enhanced load handling for better sync
+  lm.addEventListener('loadeddata', () => {
+    try {
+      const videoStream = lm.captureStream(30);
+      lm.videoStreamReady = videoStream;
+      console.log("Video stream ready for capture");
+      
+      // FIXED: Sync with deck A immediately when video loads
+      const deckA = document.getElementById("deckA");
+      if (deckA && deckA.src === url && deckA.currentTime > 0) {
+        lm.currentTime = deckA.currentTime;
+        console.log(`Live monitor synced to deck A position: ${deckA.currentTime.toFixed(2)}s`);
+      }
+    } catch (error) {
+      console.error("Error creating video stream:", error);
+    }
+  }, { once: true });
+  
+  // FIXED: Ensure live monitor starts playing
+  lm.play().catch(error => {
+    console.warn("Live monitor autoplay prevented:", error);
+  });
+}
+
+// Utility Functions
+function formatTime(seconds) {
+  if (isNaN(seconds) || !isFinite(seconds)) {
+    return "--:--";
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function parseTimeToSeconds(timeString) {
+  if (!timeString || timeString === "--:--") return 0;
+  const parts = timeString.split(':');
+  if (parts.length !== 2) return 0;
+  const minutes = parseInt(parts[0]) || 0;
+  const seconds = parseInt(parts[1]) || 0;
+  return (minutes * 60) + seconds;
+}
+
+function formatTotalTime(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+}
+
+function getAudioDuration(file, lengthCell, row) {
+  const audio = new Audio();
+  audio.src = URL.createObjectURL(file);
+  audio.addEventListener("loadedmetadata", function () {
+      let duration = formatTime(audio.duration);
+      lengthCell.textContent = duration;
+      row.dataset.fileDuration = duration;
+      updateTotalTime();
+      URL.revokeObjectURL(audio.src);
+  });
+}
+
+function getVideoDuration(file, lengthCell, row) {
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.src = URL.createObjectURL(file);
+  video.addEventListener("loadedmetadata", function () {
+      let duration = formatTime(video.duration);
+      lengthCell.textContent = duration;
+      row.dataset.fileDuration = duration;
+      updateTotalTime();
+      URL.revokeObjectURL(video.src);
+  });
+}
+
+function updateTotalTime() {
+  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
+  let totalSeconds = 0;
+  
+  rows.forEach(row => {
+    const duration = row.dataset.fileDuration;
+    totalSeconds += parseTimeToSeconds(duration);
+  });
+  
+  const totalTimeElement = document.getElementById('total-time');
+  if (totalTimeElement) {
+    totalTimeElement.textContent = formatTotalTime(totalSeconds);
+  }
+  
+  console.log(`Total playlist time: ${formatTotalTime(totalSeconds)}`);
+}
+
+function highlightRow(idx) {
+  document.querySelectorAll('#playlist-items tr').forEach(r => 
+    r.classList.remove('playing')
+  );
+  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
+  if (rows[idx]) rows[idx].classList.add('playing');
+}
+
+// Enhanced deck management with perfect live monitor sync
+function loadDeckA(idx) {
+  const deckA = document.getElementById("deckA");
+  const liveMonitor = document.getElementById("liveMonitor");
+  if (!deckA) return;
+  
+  // Clear deck A if no valid index
+  if (idx < 0 || idx >= playlistFiles.length) {
+    deckA.pause();
+    deckA.src = '';
+    deckA.dataset.fileType = '';
+    deckA.dataset.fileName = '';
+    deckA.removeAttribute('src');
+    deckA.removeAttribute('data-file-type');
+    deckA.removeAttribute('data-file-name');
+    deckA.load();
+    cleanupAudioConnections();
+    
+    // FIXED: Also clear live monitor when deck A is cleared
+    if (liveMonitor && !liveMonitor.srcObject) {
+      liveMonitor.pause();
+      liveMonitor.src = '';
+    }
+    
+    console.log("Deck A cleared - no valid content");
+    return;
+  }
+  
+  const fd = playlistFiles[idx];
+  deckA.src = fd.fileUrl;
+  deckA.dataset.fileType = fd.fileType;
+  deckA.dataset.fileName = fd.fileName;
+  
+  if (fd.fileType === "audio") {
+    deckA.muted = false;
+  } else if (fd.fileType === "video") {
+    deckA.muted = true;
+    
+    // FIXED: Set up live monitor sync for video when deck A loads
+    deckA.addEventListener('loadeddata', () => {
+      if (liveMonitor && (!liveMonitor.srcObject || liveMonitor.srcObject.getTracks().length === 0)) {
+        showFile(fd.fileUrl);
+        console.log(`Live monitor set up for deck A video: ${fd.fileName}`);
+      }
+    }, { once: true });
+  }
+  
+  deckA.play();
+  highlightRow(idx);
+  
+  console.log(`Deck A loaded: ${fd.fileName} (${fd.fileType})`);
+}
+
+function loadDeckB(idx) {
+  const deckB = document.getElementById("deckB");
+  if (!deckB) return;
+  
+  if (idx < 0 || idx >= playlistFiles.length) {
+    deckB.pause();
+    deckB.currentTime = 0;
+    deckB.removeAttribute('src');
+    deckB.removeAttribute('data-file-type');
+    deckB.removeAttribute('data-file-name');
+    deckB.load();
+    console.log("Deck B cleared - no more tracks in queue");
+    return;
+  }
+  
+  const fd = playlistFiles[idx];
+  deckB.src = fd.fileUrl;
+  deckB.dataset.fileType = fd.fileType;
+  deckB.dataset.fileName = fd.fileName;
+  console.log(`Deck B loaded: ${fd.fileName}`);
+}
+
+function dragItem(event) {
+  const row = event.currentTarget;
+  event.dataTransfer.effectAllowed = 'move';
+  
+  const payload = {
+    fileName: row.dataset.fileName,
+    fileType: row.dataset.fileType,
+    fileUrl: row.dataset.fileUrl,
+    filePath: row.dataset.filePath,
+    fileDuration: row.dataset.fileDuration
+  };
+  
+  event.dataTransfer.setData('application/json', JSON.stringify(payload));
+  
+  const playlistTable = document.getElementById('playlist-items');
+  if (playlistTable.contains(row)) {
+    event.dataTransfer.setData('text/plain', 'playlist-reorder');
+    row.classList.add('dragging');
+  }
+  
+  console.log('dragging:', payload);
+}
+
+function addToPlaylist(fileData) {
+  const row = document.createElement("tr");
+  row.dataset.fileName = fileData.fileName;
+  row.dataset.fileType = fileData.fileType;
+  row.dataset.fileUrl = fileData.fileUrl;
+  row.dataset.fileDuration = fileData.fileDuration;
+  row.setAttribute("draggable", true);
+  row.addEventListener("dragstart", dragItem);
+
+  const titleCell = document.createElement("td");
+  titleCell.textContent = fileData.fileName;
+  const typeCell = document.createElement("td");
+  typeCell.textContent = fileData.fileType || "Audio";
+  const lengthCell = document.createElement("td");
+  lengthCell.textContent = fileData.fileDuration || "--:--";
+
+  row.append(titleCell, typeCell, lengthCell);
+
+  const removeCell = document.createElement("td");
+  const removeButton = document.createElement("button");
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    updatePlaylistArray();
+    updateTotalTime();
+    
+    // Update decks after playlist item removal
+    updateDecksAfterPlaylistChange();
+  });
+  removeCell.appendChild(removeButton);
+  row.appendChild(removeCell);
+
+  const placeholder = document.querySelector(".drop-placeholder");
+  if (placeholder && placeholder.parentNode) {
+    try {
+      placeholder.remove();
+    } catch (error) {
+      console.warn("Could not remove placeholder:", error);
+    }
+  }
+
+  const playlistItems = document.getElementById("playlist-items");
+  if (playlistItems && row instanceof Node) {
+    try {
+      playlistItems.appendChild(row);
+      updateTotalTime();
+      console.log("Added to playlist:", fileData.fileName);
+    } catch (error) {
+      console.error("Error adding to playlist:", error);
+    }
+  } else {
+    console.error("Could not add to playlist: invalid elements");
+  }
+}
+
+// New function to handle deck updates after playlist changes
+function updateDecksAfterPlaylistChange() {
+  // If current index is beyond playlist length, clear and reset
+  if (currentIndex >= playlistFiles.length) {
+    if (playlistFiles.length === 0) {
+      currentIndex = -1;
+      loadDeckA(-1); // This will clear deck A
+      loadDeckB(-1); // This will clear deck B
+    } else {
+      currentIndex = playlistFiles.length - 1;
+      loadDeckA(currentIndex);
+      loadDeckB(currentIndex + 1);
+    }
+  } else {
+    // Reload current and next tracks
+    loadDeckA(currentIndex);
+    loadDeckB(currentIndex + 1);
+  }
+}
+
+function setupPlaylistRowDragDrop() {
+  const playlistTable = document.getElementById('playlist-items');
+  
+  if (!playlistTable) {
+    console.error("Playlist table not found");
+    return;
+  }
+  
+  playlistTable.addEventListener('dragover', e => {
+    e.preventDefault();
+    const dragging = document.querySelector('.dragging');
+    
+    if (!dragging) return;
+    
+    const afterElement = getDragAfterElement(playlistTable, e.clientY);
+    
+    try {
+      if (afterElement == null) {
+        playlistTable.appendChild(dragging);
+      } else {
+        playlistTable.insertBefore(dragging, afterElement);
+      }
+    } catch (error) {
+      console.warn("Error in drag operation:", error);
+    }
+  });
+
+  document.addEventListener('dragover', e => {
+    if (e.target.closest('#playlist-items tr')) {
+      e.preventDefault();
+    }
+  });
+  
+  playlistTable.addEventListener('dragend', e => {
+    const dragging = document.querySelector('.dragging');
+    if (dragging) {
+      dragging.classList.remove('dragging');
+      updatePlaylistArray();
+    }
+  });
+}
+
+function getDragAfterElement(container, y) {
+  if (!container) return null;
+  
+  const draggableElements = [...container.querySelectorAll('tr:not(.dragging):not(.drop-placeholder)')];
+  
+  return draggableElements.reduce((closest, child) => {
+    try {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      
+      if (offset < 0 && offset > closest.offset) {
+        return { offset: offset, element: child };
+      } else {
+        return closest;
+      }
+    } catch (error) {
+      console.warn("Error in drag calculation:", error);
+      return closest;
+    }
+  }, { offset: Number.NEGATIVE_INFINITY }).element;
+}
+
+function updatePlaylistArray() {
+  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
+  playlistFiles = rows.map(row => ({
+    fileName: row.dataset.fileName,
+    fileType: row.dataset.fileType,
+    fileUrl: row.dataset.fileUrl,
+    fileDuration: row.dataset.fileDuration
+  }));
+  
+  // Update decks after reordering
+  updateDecksAfterPlaylistChange();
+  updateTotalTime();
+  console.log('Playlist reordered:', playlistFiles);
+}
+
+// Browser compatibility check
+function checkBrowserCompatibility() {
+  const requiredFeatures = [
+    'MediaRecorder',
+    'WebSocket',
+    'navigator.mediaDevices',
+    'HTMLVideoElement.prototype.captureStream'
+  ];
+  
+  const missing = requiredFeatures.filter(feature => {
+    const parts = feature.split('.');
+    let obj = window;
+    for (const part of parts) {
+      if (!obj || !obj[part]) return true;
+      obj = obj[part];
+    }
+    return false;
+  });
+  
+  if (missing.length > 0) {
+    alert(`Browser compatibility issue for WAMP deployment.\nMissing features: ${missing.join(', ')}\n\nPlease use a modern browser like Chrome or Firefox.`);
+    return false;
+  }
+  
+  return true;
+}
+
+// Enhanced Settings Function
 window.showSettings = async function(button, settingsId, camId) {
   const videoElement = document.getElementById(camId);
   if (!videoElement) {
@@ -562,7 +1378,6 @@ window.showSettings = async function(button, settingsId, camId) {
     settingsDiv.id = settingsId;
     settingsDiv.className = "settings-menu";
 
-    // Create camera select with proper ID
     const cameraLabel = document.createElement("label");
     cameraLabel.textContent = "Camera: ";
     cameraLabel.htmlFor = "streamSelect";
@@ -577,7 +1392,6 @@ window.showSettings = async function(button, settingsId, camId) {
       cameraSelect.appendChild(opt);
     });
 
-    // Create mic select with proper ID
     const micLabel = document.createElement("label");
     micLabel.textContent = "Microphone: ";
     micLabel.htmlFor = "micSelect";
@@ -591,7 +1405,6 @@ window.showSettings = async function(button, settingsId, camId) {
       micSelect.appendChild(new Option(label, device.deviceId));
     });
 
-    // Set current selections if any
     if (videoElement.dataset.deviceId) {
       cameraSelect.value = videoElement.dataset.deviceId;
     }
@@ -599,17 +1412,15 @@ window.showSettings = async function(button, settingsId, camId) {
       micSelect.value = videoElement.dataset.audioDeviceId;
     }
 
-    // ENHANCED change handler with proper timing
     async function updateStream() {
       const selectedCameraId = cameraSelect.value;
       const selectedMicId = micSelect.value;
       const liveMonitor = document.getElementById("liveMonitor");
-      const isThisCameraLive = liveMonitor && liveMonitor.srcObject && 
+      const isThisCameraLive = liveMonitor.srcObject && 
                                videoElement.srcObject && 
                                liveMonitor.srcObject === videoElement.srcObject;
 
       try {
-        // Stop old stream tracks
         if (videoElement.srcObject) {
           videoElement.srcObject.getTracks().forEach(track => track.stop());
         }
@@ -619,7 +1430,6 @@ window.showSettings = async function(button, settingsId, camId) {
           return;
         }
 
-        // Store the audio device ID on the video element
         videoElement.dataset.audioDeviceId = selectedMicId;
         
         const constraints = {
@@ -629,32 +1439,23 @@ window.showSettings = async function(button, settingsId, camId) {
 
         console.log("Getting new stream with constraints:", constraints);
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        
-        // Verify stream has tracks
-        const videoTracks = stream.getVideoTracks();
-        const audioTracks = stream.getAudioTracks();
-        console.log(`New stream has ${videoTracks.length} video tracks, ${audioTracks.length} audio tracks`);
 
         videoElement.srcObject = stream;
         videoElement.dataset.deviceId = selectedCameraId;
         videoElement.play();
 
-        // CRITICAL FIX: If this camera was feeding the live monitor, update live monitor too
-        if (isThisCameraLive && liveMonitor) {
+        if (isThisCameraLive) {
           console.log("Updating live monitor with new stream from camera settings change");
           
-          // Stop old live monitor tracks first
           if (liveMonitor.srcObject) {
             liveMonitor.srcObject.getTracks().forEach(track => track.stop());
           }
           
-          // Update live monitor with new stream
           liveMonitor.srcObject = stream;
           
-          // Wait for the live monitor to be ready with the new stream
           await new Promise((resolve) => {
             const checkReady = () => {
-              if (liveMonitor.readyState >= 3) { // HAVE_FUTURE_DATA or higher
+              if (liveMonitor.readyState >= 3) {
                 resolve();
               } else {
                 setTimeout(checkReady, 50);
@@ -666,47 +1467,24 @@ window.showSettings = async function(button, settingsId, camId) {
               checkReady();
             }).catch((error) => {
               console.error("Error playing live monitor:", error);
-              resolve(); // Continue anyway
+              resolve();
             });
           });
           
-          // If streaming is active, restart with new stream
+          // Enhanced content switching
           if (isCurrentlyStreaming) {
-            console.log("Restarting live stream with new camera/mic settings");
+            console.log("Switching stream to new camera/mic settings");
             
-            // Wait a bit more for the video to be fully ready
             setTimeout(() => {
               if (liveMonitor.captureStream) {
                 try {
-                  // Make sure we're capturing from the updated live monitor
-                  console.log("Creating capture stream from updated live monitor");
                   const captureStream = liveMonitor.captureStream(30);
-                  
-                  // Verify the capture stream has tracks
-                  const capVideoTracks = captureStream.getVideoTracks();
-                  const capAudioTracks = captureStream.getAudioTracks();
-                  console.log(`Capture stream has ${capVideoTracks.length} video tracks, ${capAudioTracks.length} audio tracks`);
-                  
-                  if (capVideoTracks.length > 0 || capAudioTracks.length > 0) {
-                    restartStreamingWithNewSource(captureStream);
-                  } else {
-                    console.error("Capture stream has no tracks, retrying...");
-                    // Retry once more after a longer delay
-                    setTimeout(() => {
-                      const retryStream = liveMonitor.captureStream(30);
-                      if (retryStream.getVideoTracks().length > 0 || retryStream.getAudioTracks().length > 0) {
-                        restartStreamingWithNewSource(retryStream);
-                      } else {
-                        console.error("Failed to capture valid stream after retry");
-                      }
-                    }, 500);
-                  }
-                  
+                  switchStreamContent(captureStream, 'camera');
                 } catch (error) {
-                  console.error("Error capturing stream from live monitor:", error);
+                  console.error("Error switching stream with new settings:", error);
                 }
               }
-            }, 300); // Increased delay to ensure video is fully ready
+            }, 500);
           }
         }
 
@@ -720,7 +1498,6 @@ window.showSettings = async function(button, settingsId, camId) {
     cameraSelect.addEventListener("change", updateStream);
     micSelect.addEventListener("change", updateStream);
 
-    // Add elements to settings div
     settingsDiv.appendChild(cameraLabel);
     settingsDiv.appendChild(cameraSelect);
     settingsDiv.appendChild(document.createElement("br"));
@@ -729,14 +1506,12 @@ window.showSettings = async function(button, settingsId, camId) {
 
     document.body.appendChild(settingsDiv);
 
-    // Position the settings menu
     const buttonRect = button.getBoundingClientRect();
     settingsDiv.style.position = "absolute";
     settingsDiv.style.left = `${buttonRect.left}px`;
     settingsDiv.style.top = `${buttonRect.bottom}px`;
     settingsDiv.style.zIndex = 9999;
 
-    // Add styling
     settingsDiv.style.backgroundColor = "#333";
     settingsDiv.style.padding = "15px";
     settingsDiv.style.borderRadius = "5px";
@@ -760,7 +1535,6 @@ window.showSettings = async function(button, settingsId, camId) {
       label.style.marginBottom = "5px";
     });
 
-    // Close menu when clicking outside
     document.addEventListener('click', function handleOutsideClick(e) {
       if (!settingsDiv.contains(e.target) && e.target !== button) {
         settingsDiv.remove();
@@ -773,34 +1547,111 @@ window.showSettings = async function(button, settingsId, camId) {
   }
 };
 
-document.addEventListener("DOMContentLoaded", async () => {
-  let playlistFiles = [];
-  let currentIndex = -1; 
+// Session management functions
+async function saveSession() {
+  try {
+    if (typeof require !== 'undefined') {
+      const { dialog } = require('electron').remote;
+      const fs = require('fs');
+      
+      // build session payload
+      const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
+      const playlist = rows.map(r => ({
+        fileName: r.dataset.fileName,
+        fileUrl:  r.dataset.fileUrl,
+        fileType: r.dataset.fileType,
+        fileDuration: r.dataset.fileDuration
+      }));
+      const nowIdx = rows.findIndex(r => r.classList.contains('playing'));
+      const deckA = document.getElementById('deckA');
+      const name = await dialog.showInputBox({ prompt: 'Session name?' })
+                 || `session-${new Date().toISOString().slice(0,10)}`;
+      const session = {
+        created: new Date().toISOString(),
+        name,
+        playlist,
+        nowPlayingIndex: nowIdx,
+        deckA: { src: deckA ? deckA.src : '', currentTime: deckA ? deckA.currentTime : 0 }
+      };
+    
+      const { filePath } = await dialog.showSaveDialog({
+        title: 'Save session',
+        defaultPath: `${name}.json`,
+        filters: [{ name:'Session', extensions:['json'] }]
+      });
+      if (filePath) fs.writeFileSync(filePath, JSON.stringify(session,null,2), 'utf-8');
+    }
+  } catch (error) {
+    console.error('Error saving session:', error);
+  }
+}
 
+async function loadSession() {
+  try {
+    if (typeof require !== 'undefined') {
+      const { dialog } = require('electron').remote;
+      const fs = require('fs');
+      
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Load session',
+        properties: ['openFile'],
+        filters: [{ name:'Session', extensions:['json'] }]
+      });
+      if (canceled) return;
+      const session = JSON.parse(fs.readFileSync(filePaths[0], 'utf-8'));
+    
+      // re-populate playlist
+      const tbody = document.getElementById('playlist-items');
+      if (tbody) {
+        tbody.innerHTML = `<tr class="drop-placeholder">
+            <td colspan="4" style="text-align:center;color:gray;">Drag & drop items here</td>
+          </tr>`;
+        session.playlist.forEach(item => addToPlaylist(item));
+      }
+    
+      // restore now playing
+      if (session.nowPlayingIndex >= 0) {
+        const deckA = document.getElementById('deckA');
+        if (deckA) {
+          deckA.src = session.deckA.src;
+          deckA.currentTime = session.deckA.currentTime;
+          deckA.play();
+        }
+        highlightRow(session.nowPlayingIndex);
+      }
+    }
+  } catch (error) {
+    console.error('Error loading session:', error);
+  }
+}
+
+// Main DOMContentLoaded Event
+document.addEventListener("DOMContentLoaded", async () => {
+  console.log("FIXED Campus Radio - Complete Version Initializing...");
+
+  if (!checkBrowserCompatibility()) {
+    console.error('Browser compatibility check failed');
+    return;
+  }
+
+  // Media Library Functions
   function updateMediaLibrary(inputElement, targetTableId, mediaType) {
     console.log(`updateMediaLibrary called for ${mediaType}`, inputElement.files);
     const targetTable = document.getElementById(targetTableId);
-    if (!targetTable) {
-      console.error(`Target table ${targetTableId} not found`);
-      return;
-    }
-    
     Array.from(inputElement.files).forEach(file => {
       if (!file) return;
 
       let row = document.createElement("tr");
       row.setAttribute("draggable", true);
-      row.dataset.fileName   = file.name;
-      row.dataset.fileType   = mediaType;
-      row.dataset.fileUrl    = URL.createObjectURL(file);
+      row.dataset.fileName = file.name;
+      row.dataset.fileType = mediaType;
+      row.dataset.fileUrl = URL.createObjectURL(file);
       row.dataset.fileDuration = "--:--";
-
-      // optional: if you need the real path in Electron
-      row.dataset.filePath   = file.path || "";
+      row.dataset.filePath = file.path || "";
 
       row.addEventListener("dragstart", dragItem);
 
-      let titleCell  = document.createElement("td");
+      let titleCell = document.createElement("td");
       titleCell.textContent = file.name;
       let lengthCell = document.createElement("td");
       lengthCell.textContent = "Loading...";
@@ -809,7 +1660,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       row.appendChild(lengthCell);
       targetTable.appendChild(row);
 
-      // load metadata
       if (mediaType === "audio") {
         getAudioDuration(file, lengthCell, row);
       } else {
@@ -818,6 +1668,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Setup Media Upload Handlers
   const audioInput = document.getElementById('audioUpload');
   if (audioInput) {
     audioInput.addEventListener('change', e => {
@@ -834,6 +1685,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Camera Device Population
   async function populateCameraDevices() {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -854,103 +1706,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  function showCameraStream(stream) {
-    const lm = document.getElementById("liveMonitor");
-    lm.pause(); 
-    lm.removeAttribute("src"); 
-    lm.removeAttribute("srcObject");
-    lm.srcObject = stream;
-    lm.play();
-  }
-
-  function showFile(url) {
-    const lm = document.getElementById("liveMonitor");
-    if (lm.srcObject) lm.srcObject.getTracks().forEach(t=>t.stop());
-    lm.pause(); 
-    lm.removeAttribute("srcObject");
-    lm.src = url;
-    lm.play();
-  }
-
-  function formatTime(seconds) {
-    if (isNaN(seconds) || !isFinite(seconds)) {
-      return "--:--";
-    }
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  }
-
-  function parseTimeToSeconds(timeString) {
-    if (!timeString || timeString === "--:--") return 0;
-    const parts = timeString.split(':');
-    if (parts.length !== 2) return 0;
-    const mins = parseInt(parts[0]) || 0;
-    const secs = parseInt(parts[1]) || 0;
-    return (mins * 60) + secs;
-  }
-
-  function formatTotalTime(totalSeconds) {
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-    } else {
-      return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-    }
-  }
-
-  function getAudioDuration(file, lengthCell, row) {
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(file);
-    audio.addEventListener("loadedmetadata", function () {
-        let duration = formatTime(audio.duration);
-        lengthCell.textContent = duration;
-        row.dataset.fileDuration = duration;
-        updateTotalTime();
-        URL.revokeObjectURL(audio.src);
-    });
-  }
-
-  function getVideoDuration(file, lengthCell, row) {
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.src = URL.createObjectURL(file);
-    video.addEventListener("loadedmetadata", function () {
-        let duration = formatTime(video.duration);
-        lengthCell.textContent = duration;
-        row.dataset.fileDuration = duration;
-        updateTotalTime();
-        URL.revokeObjectURL(video.src);
-    });
-  }
-
-  // Update the preview for a given camera element with a new stream.
-  async function updateCameraPreview(camId, deviceId) {
-    try {
-      const videoElement = document.getElementById(camId);
-      if (videoElement.srcObject) {
-        videoElement.srcObject.getTracks().forEach(track => track.stop());
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: deviceId } },
-        audio: false
-      });
-      videoElement.srcObject = stream;
-      videoElement.play();
-      console.log(`Updated preview for ${camId} with device ${deviceId}`);
-    } catch (error) {
-      console.error(`Error updating preview for ${camId}:`, error);
-    }
-  }
-
-  // Bruce - FFmpeg device enumeration
+  // FFmpeg Device Integration
   try {
     if (window.electronAPI && window.electronAPI.getFFmpegDevices) {
       const ffmpegDevices = await window.electronAPI.getFFmpegDevices();
       console.log("DirectShow devices from FFmpeg:", ffmpegDevices);
+      
       const streamSelect = document.getElementById("streamSelect");
       if (streamSelect) {
         ffmpegDevices.forEach(name => {
@@ -971,68 +1732,277 @@ document.addEventListener("DOMContentLoaded", async () => {
             micSelect.appendChild(opt);
           });
         }
-
-        const startStreamBtn = document.getElementById("start-stream");
-        if (startStreamBtn) {
-          startStreamBtn.addEventListener("click", async () => {
-            const streamSelect = document.getElementById("streamSelect");
-            const micSelect = document.getElementById("micSelect");
-
-            const cameraName = streamSelect.value;
-            const micName = micSelect.value;
-
-            const videoDeviceId = await getBrowserDeviceIdForFFmpegName(cameraName);
-            const audioDeviceId = await getBrowserDeviceIdForFFmpegName(micName);
-
-            if (!videoDeviceId) return alert("No matching camera found.");
-            if (!audioDeviceId) return alert("No matching microphone found.");
-
-            await updateCameraPreview("liveMonitor", videoDeviceId);
-
-            if (window.electronAPI && window.electronAPI.startFFmpeg) {
-              window.electronAPI.startFFmpeg(
-                "rtmp://localhost/live/stream",
-                cameraName,
-                micName
-              );
-            }
-          });
-        }
       }
     }
   } catch (err) {
     console.error("Error fetching FFmpeg devices:", err);
   }
 
-  function highlightRow(idx) {
-    document.querySelectorAll('#playlist-items tr').forEach(r => 
-      r.classList.remove('playing')
-    );
-    const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
-    if (rows[idx]) rows[idx].classList.add('playing');
-  }
-
   await populateCameraDevices();
   setupPlaylistRowDragDrop();
 
+  // Get DOM Elements
   const liveMonitor = document.getElementById("liveMonitor");
-  const liveStatus = document.getElementById("live-status");
-  const playlistDropZone = document.getElementById("playlist");
   const deckA = document.getElementById("deckA");
   const deckB = document.getElementById("deckB");
-  const seekControl = document.getElementById("seekA"); 
-  let mediaStreams = {}; 
-  let activeCameraId = null;
-  let isStreaming = false;
-  let rtmpUrl = "rtmp://localhost/live/stream";
-  let draggedRow = null;
-  let lastSeekTimeUpdate = 0; 
-  let isScrubbing = false; 
-
+  const seekControl = document.getElementById("seekA");
   const startBtn = document.getElementById("start-stream");
   const stopBtn = document.getElementById("stop-stream");
+  const fadeButton = document.getElementById("fadeButton");
+  const playlist = document.getElementById('playlist');
 
-  // ENHANCED START BUTTON WITH HLS CLEANUP INTEGRATION
+  // Enhanced Deck A Event Handlers with fixed audio reuse
+  if (deckA) {
+    // FIXED: Track if audio setup is already done to prevent recreation
+    let audioSetupComplete = false;
+    
+    deckA.addEventListener("play", () => {
+      if (deckA.dataset.fileType === "video") {
+        // Only cleanup audio visualization if not currently streaming
+        if (!isCurrentlyStreaming) {
+          cleanupAudioVisualization();
+        }
+        showFile(deckA.src);
+        deckA.muted = true;
+        console.log("Video playing – deckA muted.");
+        
+        // FIXED: Ensure live monitor is in sync when deck A starts playing
+        setTimeout(() => {
+          const liveMonitor = document.getElementById("liveMonitor");
+          if (liveMonitor && liveMonitor.src === deckA.src) {
+            // Force sync to current deck A position
+            liveMonitor.currentTime = deckA.currentTime;
+            if (liveMonitor.paused) {
+              liveMonitor.play();
+            }
+            console.log(`Live monitor synced to deck A start position: ${deckA.currentTime.toFixed(2)}s`);
+          }
+        }, 200); // Small delay to ensure video is loaded
+        
+        // Enhanced content switch if streaming - NO RESTART, just switch content
+        if (isCurrentlyStreaming && !window.skipNextStreamSwitch) {
+          setTimeout(() => {
+            if (liveMonitor.captureStream) {
+              try {
+                const videoStream = liveMonitor.captureStream(30);
+                switchStreamContent(videoStream, 'video');
+              } catch (error) {
+                console.error("Error switching to video content:", error);
+              }
+            }
+          }, 500);
+        }
+        
+        // Clear the skip flag
+        if (window.skipNextStreamSwitch) {
+          window.skipNextStreamSwitch = false;
+          console.log("Skipped stream switch to prevent double switching");
+        }
+      } else if (deckA.dataset.fileType === "audio") {
+        deckA.muted = false;
+        console.log("Audio playing – deckA unmuted.");
+        
+        // FIXED: Only set up audio capture once per track
+        if (!audioSetupComplete || !deckA.audioSourceNode) {
+          if (!audioContext || audioContext.state === 'closed') {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          
+          try {
+            const combinedStream = setupAudioStreamCapture(deckA);
+            console.log("Audio with soundwave video setup complete");
+            audioSetupComplete = true;
+            
+            // Enhanced content switch if streaming - NO RESTART, just switch content
+            if (isCurrentlyStreaming) {
+              setTimeout(() => {
+                if (liveMonitor.combinedStream) {
+                  switchStreamContent(liveMonitor.combinedStream, 'audio');
+                }
+              }, 500);
+            }
+          } catch (error) {
+            console.error("Error setting up audio with soundwave:", error);
+            audioSetupComplete = false;
+            if (liveMonitor) {
+              liveMonitor.src = "icons/soundwave.mp4";
+              liveMonitor.loop = true;
+              liveMonitor.muted = true;
+              liveMonitor.play();
+            }
+          }
+        } else {
+          console.log("Audio setup already complete, reusing existing connection");
+          
+          // Still switch stream content if streaming
+          if (isCurrentlyStreaming) {
+            setTimeout(() => {
+              if (liveMonitor.combinedStream) {
+                switchStreamContent(liveMonitor.combinedStream, 'audio');
+              }
+            }, 500);
+          }
+        }
+      }
+    });
+    
+    // FIXED: Reset audio setup flag when source changes
+    deckA.addEventListener("loadstart", () => {
+      console.log("Deck A loading new source, resetting audio setup");
+      audioSetupComplete = false;
+    });
+
+    // FIXED: Enhanced Live Monitor synchronization with Deck A
+    function syncLiveMonitor() {
+      if (deckA.dataset.fileType === "video" && deckA.duration) {
+        requestAnimationFrame(() => {
+          if (seekControl) {
+            seekControl.value = (deckA.currentTime / deckA.duration) * 100;
+          }
+          
+          // FIXED: Always sync live monitor with deck A, even during scrubbing
+          if (liveMonitor && liveMonitor.src === deckA.src) {
+            const timeDiff = Math.abs(liveMonitor.currentTime - deckA.currentTime);
+            if (timeDiff > 0.1) { // More sensitive sync threshold
+              liveMonitor.currentTime = deckA.currentTime;
+              console.log(`Live monitor synced to deck A: ${deckA.currentTime.toFixed(2)}s`);
+            }
+          }
+        });
+      }
+    }
+
+    // FIXED: Continuous synchronization
+    deckA.addEventListener("timeupdate", syncLiveMonitor);
+    
+    deckA.addEventListener("seeked", () => {
+      console.log(`Deck A seeked to: ${deckA.currentTime.toFixed(2)}s`);
+      
+      if (deckA.dataset.fileType === "video") {
+        syncLiveMonitor();
+        
+        // Only switch content for video, not audio
+        if (isCurrentlyStreaming) {
+          setTimeout(() => {
+            try {
+              const newVideoStream = liveMonitor.captureStream(30);
+              switchStreamContent(newVideoStream, 'video');
+            } catch (error) {
+              console.error("Error updating video stream after seek:", error);
+            }
+          }, 100);
+        }
+      }
+    });
+
+    if (seekControl) {
+      seekControl.addEventListener("input", (event) => {
+        if (deckA.dataset.fileType === "video" && deckA.duration) {
+          isScrubbing = true;
+          let seekTime = (event.target.value / 100) * deckA.duration;
+          
+          // FIXED: Set both deck A and live monitor simultaneously
+          if (liveMonitor && liveMonitor.src === deckA.src) {
+            liveMonitor.currentTime = seekTime;
+          }
+          deckA.currentTime = seekTime;
+          
+          console.log(`Scrubbing to: ${seekTime.toFixed(2)}s`);
+        }
+      });
+
+      seekControl.addEventListener("change", (event) => {
+        if (deckA.dataset.fileType === "video") {
+          isScrubbing = false;
+          let seekTime = (event.target.value / 100) * deckA.duration;
+          
+          // FIXED: Ensure final sync when scrubbing ends
+          if (liveMonitor && liveMonitor.src === deckA.src) {
+            liveMonitor.currentTime = seekTime;
+            if (liveMonitor.paused) {
+              liveMonitor.play();
+            }
+          }
+          
+          // FIXED: Trigger seeked event for stream update
+          console.log(`Scrubbing finished at: ${seekTime.toFixed(2)}s`);
+          
+          // Force sync one more time
+          setTimeout(() => {
+            syncLiveMonitor();
+          }, 50);
+        }
+      });
+    }
+
+    if (liveMonitor) {
+      liveMonitor.addEventListener("seeking", (event) => {
+        if (!deckA.src || deckA.dataset.fileType !== "video") {
+          event.preventDefault();
+        }
+      });
+    }
+
+    deckA.addEventListener("pause", () => {
+      const liveMonitor = document.getElementById("liveMonitor");
+      if (liveMonitor && liveMonitor.src === deckA.src) {
+        liveMonitor.pause();
+        console.log("Live monitor paused with deck A");
+      }
+    });
+
+    // FIXED: Add resume synchronization
+    deckA.addEventListener("play", () => {
+      const liveMonitor = document.getElementById("liveMonitor");
+      if (liveMonitor && liveMonitor.src === deckA.src && deckA.dataset.fileType === "video") {
+        if (liveMonitor.paused && !deckA.paused) {
+          liveMonitor.play();
+          console.log("Live monitor resumed with deck A");
+        }
+      }
+    });
+  }
+  
+  deckA.addEventListener("ended", () => {
+  console.log("Deck A track ended, loading next track");
+  
+  const wasStreaming = isCurrentlyStreaming;
+  
+  currentIndex++;
+  loadDeckA(currentIndex);
+  loadDeckB(currentIndex + 1);
+  
+  // Simple continuation for streaming
+  if (wasStreaming && currentIndex < playlistFiles.length) {
+    setTimeout(() => {
+      const nextTrack = playlistFiles[currentIndex];
+      const liveMonitor = document.getElementById("liveMonitor");
+      
+      if (nextTrack.fileType === "video") {
+        const videoStream = liveMonitor.captureStream(30);
+        switchStreamContent(videoStream, 'video');
+      } else if (nextTrack.fileType === "audio" && liveMonitor.combinedStream) {
+        switchStreamContent(liveMonitor.combinedStream, 'audio');
+      }
+    }, 1000);
+  }
+  
+  // Update live monitor for non-streaming cases
+  if (currentIndex < playlistFiles.length && !wasStreaming) {
+    const liveMonitor = document.getElementById("liveMonitor");
+    const nextTrack = playlistFiles[currentIndex];
+    if (nextTrack && nextTrack.fileType === "video" && liveMonitor) {
+      setTimeout(() => {
+        if (liveMonitor.src !== nextTrack.fileUrl) {
+          showFile(nextTrack.fileUrl);
+          console.log(`Live monitor updated for next track: ${nextTrack.fileName}`);
+        }
+      }, 100);
+    }
+  }
+});
+
+  // Enhanced Start Stream Button with empty monitor support
   if (startBtn) {
     startBtn.addEventListener("click", async () => {
       if (!confirm("Are you sure you want to start live streaming? This will begin broadcasting the current live monitor feed.")) {
@@ -1040,9 +2010,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       try {
-        console.log("Initiating stream start sequence...");
+        console.log("Initiating enhanced stream start sequence...");
 
-        // Step 1: Clean up any leftover HLS files from previous sessions
+        const wampOK = await checkWAMPStatus();
+        if (!wampOK) {
+          throw new Error("WAMP server not available");
+        }
+
+        // HLS cleanup
         if (window.electronAPI && window.electronAPI.forceHLSCleanup) {
           try {
             console.log("Cleaning up any leftover HLS files before starting new stream...");
@@ -1055,503 +2030,179 @@ document.addEventListener("DOMContentLoaded", async () => {
           }
         }
 
-        // Step 2: Start HLS cleanup monitoring
         if (window.electronAPI && window.electronAPI.startHLSCleanup) {
           try {
             const result = await window.electronAPI.startHLSCleanup();
             if (result.success) {
               console.log("HLS cleanup monitoring started successfully");
-            } else {
-              console.warn("HLS cleanup start failed:", result.error);
             }
           } catch (error) {
             console.warn("Could not start HLS cleanup monitoring:", error);
           }
         }
 
-        // Step 3: Verify live monitor has content
-        const liveMonitor = document.getElementById("liveMonitor");
-        if (!liveMonitor || (!liveMonitor.srcObject && !liveMonitor.src)) {
-          alert("No content in Live Monitor! Please add some content first.");
-          
-          // Stop cleanup since we're not actually streaming
-          if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
-            await window.electronAPI.stopHLSCleanup();
-          }
-          return;
-        }
-
         console.log("Starting stream with content from Live Monitor");
         
-        // Step 4: Start WebSocket streaming
-        try {
-          if (!liveMonitor.captureStream) {
-            throw new Error("captureStream not supported in this browser");
+        let streamToCapture;
+        let contentType = 'unknown';
+
+        // Support empty monitor with fallback content
+        if (liveMonitor.combinedStream) {
+          streamToCapture = liveMonitor.combinedStream;
+          contentType = 'audio';
+        } else if (liveMonitor.srcObject && liveMonitor.srcObject.getTracks().length > 0) {
+          streamToCapture = liveMonitor.srcObject;
+          contentType = 'camera';
+        } else if (liveMonitor.src) {
+          try {
+            streamToCapture = liveMonitor.captureStream(30);
+            contentType = 'video';
+          } catch (error) {
+            console.error("Could not capture video stream:", error);
+            streamToCapture = createFallbackStream();
+            contentType = 'fallback';
           }
-
-          const stream = liveMonitor.captureStream(30);
-          const mimeType = getSupportedMimeType();
-          
-          if (!mimeType) {
-            throw new Error("No supported MIME types found for MediaRecorder");
-          }
-
-          // Create WebSocket connection with proper error handling
-          currentWebSocket = new WebSocket("ws://localhost:9999");
-          
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              reject(new Error("WebSocket connection timeout"));
-            }, 5000);
-
-            currentWebSocket.addEventListener("open", () => {
-              clearTimeout(timeout);
-              console.log("WebSocket connected successfully");
-              resolve();
-            });
-
-            currentWebSocket.addEventListener("error", (error) => {
-              clearTimeout(timeout);
-              console.error('WebSocket connection error:', error);
-              reject(new Error("WebSocket connection failed"));
-            });
-          });
-
-          // Create and start MediaRecorder
-          currentMediaRecorder = new MediaRecorder(stream, { 
-            mimeType: mimeType,
-            videoBitsPerSecond: 2500000,
-            audioBitsPerSecond: 192000
-          });
-          
-          currentMediaRecorder.ondataavailable = e => {
-            if (e.data.size > 0 && currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-              try {
-                currentWebSocket.send(e.data);
-                // Log successful data transmission occasionally
-                if (Math.random() < 0.005) { // 0.5% of the time
-                  console.log(`Sent ${e.data.size} bytes to WebSocket`);
-                }
-              } catch (error) {
-                console.error('Error sending data to WebSocket:', error);
-              }
-            }
-          };
-
-          currentMediaRecorder.onerror = async (event) => {
-            console.error('MediaRecorder error:', event);
-            await handleStreamError('MediaRecorder error: ' + (event.error || 'Unknown error'));
-          };
-          
-          currentMediaRecorder.onstart = () => {
-            console.log("MediaRecorder started successfully with mimeType:", mimeType);
-            isCurrentlyStreaming = true;
-            updateLiveStatus(true);
-          };
-
-          currentMediaRecorder.onstop = () => {
-            console.log("MediaRecorder stopped");
-            isCurrentlyStreaming = false;
-          };
-
-          // Add WebSocket error and close handlers
-          currentWebSocket.onerror = async (error) => {
-            console.error('WebSocket error:', error);
-            await handleStreamError('WebSocket error occurred');
-          };
-
-          currentWebSocket.onclose = async (event) => {
-            if (isCurrentlyStreaming) {
-              console.warn('WebSocket closed unexpectedly:', event);
-              await handleStreamError('WebSocket connection lost');
-            }
-          };
-          
-          currentMediaRecorder.start(500); // 500ms chunks for better responsiveness
-          console.log("Stream started successfully with fresh HLS cleanup!");
-
-        } catch (error) {
-          console.error("Error starting WebSocket streaming:", error);
-          await handleStreamError("Failed to start stream: " + error.message);
+        } else {
+          // Empty monitor - create fallback content
+          console.log("Empty live monitor - creating fallback stream");
+          streamToCapture = createFallbackStream();
+          contentType = 'fallback';
         }
 
+        // Start enhanced stream
+        await startNewStream(streamToCapture, contentType);
+        
+        // Wait for HLS segments to be generated
+        console.log("Waiting for HLS segments to be generated...");
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        console.log("Enhanced stream started successfully!");
+
       } catch (error) {
-        console.error("Error in stream start sequence:", error);
+        console.error("Error in enhanced stream start sequence:", error);
         await handleStreamError("Failed to start stream: " + error.message);
       }
     });
   }
 
-  // ENHANCED STOP BUTTON WITH HLS CLEANUP INTEGRATION
+  // Enhanced Stop Stream Button
   if (stopBtn) {
     stopBtn.addEventListener("click", async () => {
       if (!confirm("Are you sure you want to stop the live stream?")) {
         return;
       }
 
-      console.log("Initiating stream stop sequence...");
-      
-      try {
-        // Step 1: Stop MediaRecorder first
-        if (currentMediaRecorder && currentMediaRecorder.state !== "inactive") {
-          try {
-            console.log("Stopping MediaRecorder...");
-            currentMediaRecorder.stop();
-            
-            // Wait a bit for it to fully stop
-            await new Promise((resolve) => {
-              if (currentMediaRecorder.state === "inactive") {
-                resolve();
-              } else {
-                currentMediaRecorder.addEventListener('stop', resolve, { once: true });
-                setTimeout(resolve, 2000); // Timeout after 2 seconds
-              }
-            });
-            
-            currentMediaRecorder = null;
-            console.log("MediaRecorder stopped successfully");
-          } catch (error) {
-            console.error('Error stopping MediaRecorder:', error);
-          }
-        }
-
-        // Step 2: Close WebSocket
-        if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-          try {
-            console.log("Closing WebSocket...");
-            currentWebSocket.close();
-            
-            // Wait for WebSocket to close
-            await new Promise((resolve) => {
-              if (currentWebSocket.readyState === WebSocket.CLOSED) {
-                resolve();
-              } else {
-                currentWebSocket.addEventListener('close', resolve, { once: true });
-                setTimeout(resolve, 2000); // Timeout after 2 seconds
-              }
-            });
-            
-            currentWebSocket = null;
-            console.log("WebSocket closed successfully");
-          } catch (error) {
-            console.error('Error closing WebSocket:', error);
-          }
-        }
-
-        // Step 3: Update status immediately
-        isCurrentlyStreaming = false;
-        updateLiveStatus(false);
-
-        // Step 4: Stop HLS cleanup monitoring
-        if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
-          try {
-            console.log("Stopping HLS cleanup monitoring...");
-            await window.electronAPI.stopHLSCleanup();
-            console.log("HLS cleanup monitoring stopped");
-          } catch (error) {
-            console.warn("Could not stop HLS cleanup monitoring:", error);
-          }
-        }
-
-        // Step 5: Wait for any current segments to finish playing (give viewers time)
-        console.log("Waiting for current segments to finish playing...");
-        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay
-
-        // Step 6: FORCE CLEANUP all remaining HLS files
-        if (window.electronAPI && window.electronAPI.forceHLSCleanup) {
-          try {
-            console.log("Force cleaning up all HLS segments and playlists...");
-            const cleanupResult = await window.electronAPI.forceHLSCleanup();
-            if (cleanupResult.success) {
-              console.log(`Force cleanup completed - Removed ${cleanupResult.filesRemoved} files`);
-            } else {
-              console.warn("Force cleanup failed:", cleanupResult.error);
-            }
-          } catch (error) {
-            console.warn("Could not force cleanup HLS files:", error);
-          }
-        }
-
-        // Step 7: Clear any cached HLS content in the player
-        try {
-          // Stop any HLS.js instances if they exist
-          if (window.hls) {
-            window.hls.destroy();
-            window.hls = null;
-          }
-          
-          // Clear the live monitor source to prevent cached content
-          const liveMonitor = document.getElementById("liveMonitor");
-          if (liveMonitor && liveMonitor.src && liveMonitor.src.includes('.m3u8')) {
-            liveMonitor.pause();
-            liveMonitor.removeAttribute('src');
-            liveMonitor.load(); // This forces the browser to clear cached content
-            console.log("Cleared HLS content from live monitor");
-          }
-        } catch (error) {
-          console.warn("Could not clear HLS player cache:", error);
-        }
-
-        console.log("Stream stopped and all HLS content cleaned successfully!");
-
-      } catch (error) {
-        console.error("Error in stream stop sequence:", error);
-        updateLiveStatus(false);
-        isCurrentlyStreaming = false;
-      }
+      console.log("Initiating enhanced stream stop sequence...");
+      await stopCurrentStream();
+      console.log("Enhanced stream stop sequence completed!");
     });
   }
 
-  if (deckA) {
-    deckA.addEventListener("play", () => {
-        if (deckA.dataset.fileType === "video") {
-            showFile(deckA.src);
-            deckA.muted = true;
-            console.log("Video playing – deckA muted.");
-        } else if (deckA.dataset.fileType === "audio") {
-            deckA.muted = false;
-            console.log("Audio playing – deckA unmuted.");
-        }
-    });        
-    
-    function syncLiveMonitor() {
-        if (deckA.dataset.fileType === "video" && deckA.duration && !isScrubbing) {
-            requestAnimationFrame(() => {
-                if (seekControl) {
-                  seekControl.value = (deckA.currentTime / deckA.duration) * 100;
-                }
-                if (liveMonitor && Math.abs(liveMonitor.currentTime - deckA.currentTime) > 0.2) {
-                    liveMonitor.currentTime = deckA.currentTime;
-                }
-            });
-        }
-    }
-
-    deckA.addEventListener("timeupdate", syncLiveMonitor);
-
-    if (seekControl) {
-      seekControl.addEventListener("input", (event) => {
-          if (deckA.dataset.fileType === "video" && deckA.duration) {
-              isScrubbing = true;
-              let seekTime = (event.target.value / 100) * deckA.duration;
-              if (liveMonitor) {
-                liveMonitor.pause();
-                liveMonitor.currentTime = seekTime;
-              }
-              deckA.currentTime = seekTime;
-          }
-      });
-
-      seekControl.addEventListener("change", () => {
-          if (deckA.dataset.fileType === "video") {
-              isScrubbing = false;
-              if (liveMonitor) {
-                liveMonitor.play();
-              }
-          }
-      });
-    }
-
-    if (liveMonitor) {
-      liveMonitor.addEventListener("seeking", (event) => {
-          if (!deckA.src || deckA.dataset.fileType !== "video") {
-              event.preventDefault();
-          }
-      });
-    }
-
-    deckA.addEventListener("pause", () => {
-        if (liveMonitor) {
-          liveMonitor.pause();
-        }
-    });
-
-    deckA.addEventListener("ended", () => {
-      currentIndex++;
-      loadDeckA(currentIndex);
-      loadDeckB(currentIndex + 1);
-    });
-  }
-
-  function shiftTracks() {
-      if (deckB && deckB.src && deckB.src !== "") {
-          console.log("Shifting track from Deck B to Deck A...");
-          if (deckA) {
-            deckA.src = deckB.src;
-            deckA.dataset.fileType = deckB.dataset.fileType;
-            deckA.dataset.fileName = deckB.dataset.fileName;
-            
-            if (deckA.dataset.fileType === "audio") {
-                deckA.muted = false;
-                console.log("Audio track detected – deckA unmuted.");
-            }
-
-            if (deckA.dataset.fileType === "video") {
-              showFile(deckA.src);
-            }
-            
-            deckA.play();
-          }
-          
-          deckB.src = "";
-          deckB.removeAttribute("data-file-type");
-          deckB.removeAttribute("data-file-name");
-      }
-      processPlaylist();
-  }
-  
-  async function saveSession() {
-    try {
-      if (typeof require !== 'undefined') {
-        const { dialog } = require('electron').remote;
-        const fs = require('fs');
-        
-        // build session payload
-        const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
-        const playlist = rows.map(r => ({
-          fileName: r.dataset.fileName,
-          fileUrl:  r.dataset.fileUrl,
-          fileType: r.dataset.fileType,
-          fileDuration: r.dataset.fileDuration
-        }));
-        const nowIdx = rows.findIndex(r => r.classList.contains('playing'));
-        const deckA = document.getElementById('deckA');
-        const name = await dialog.showInputBox({ prompt: 'Session name?' })
-                   || `session-${new Date().toISOString().slice(0,10)}`;
-        const session = {
-          created: new Date().toISOString(),
-          name,
-          playlist,
-          nowPlayingIndex: nowIdx,
-          deckA: { src: deckA ? deckA.src : '', currentTime: deckA ? deckA.currentTime : 0 }
-        };
-      
-        const { filePath } = await dialog.showSaveDialog({
-          title: 'Save session',
-          defaultPath: `${name}.json`,
-          filters: [{ name:'Session', extensions:['json'] }]
-        });
-        if (filePath) fs.writeFileSync(filePath, JSON.stringify(session,null,2), 'utf-8');
-      }
-    } catch (error) {
-      console.error('Error saving session:', error);
-    }
-  }
-  
-  async function loadSession() {
-    try {
-      if (typeof require !== 'undefined') {
-        const { dialog } = require('electron').remote;
-        const fs = require('fs');
-        
-        const { canceled, filePaths } = await dialog.showOpenDialog({
-          title: 'Load session',
-          properties: ['openFile'],
-          filters: [{ name:'Session', extensions:['json'] }]
-        });
-        if (canceled) return;
-        const session = JSON.parse(fs.readFileSync(filePaths[0], 'utf-8'));
-      
-        // re-populate playlist
-        const tbody = document.getElementById('playlist-items');
-        if (tbody) {
-          tbody.innerHTML = `<tr class="drop-placeholder">
-              <td colspan="4" style="text-align:center;color:gray;">Drag & drop items here</td>
-            </tr>`;
-          session.playlist.forEach(item => addToPlaylist(item));
-        }
-      
-        // restore now playing
-        if (session.nowPlayingIndex >= 0) {
-          const deckA = document.getElementById('deckA');
-          if (deckA) {
-            deckA.src = session.deckA.src;
-            deckA.currentTime = session.deckA.currentTime;
-            deckA.play();
-          }
-          highlightRow(session.nowPlayingIndex);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading session:', error);
-    }
-  }
-  
-  // wire up buttons
-  const saveSessionBtn = document.getElementById('save-session');
-  const loadSessionBtn = document.getElementById('load-session');
-  
-  if (saveSessionBtn) {
-    saveSessionBtn.addEventListener('click', saveSession);
-  }
-  if (loadSessionBtn) {
-    loadSessionBtn.addEventListener('click', loadSession);
-  }
-
-  function getActiveCamera() {
-    const camIds = ['cam1','cam2','cam3','cam4'];
-    for (let id of camIds) {
-      const el = document.getElementById(id);
-      if (el && el.srcObject && el.srcObject.getTracks().length > 0) {
-        // we found a live camera stream
-        return id;
-      }
-    }
-    return null;
-  }        
-
-  const fadeButton = document.getElementById("fadeButton");
+  // Enhanced Crossfade Button
   if (fadeButton) {
     fadeButton.addEventListener("click", function () {
-        let fadeTime = 5000;
-        let startVolumeA = deckA ? deckA.volume : 0;
-        let startVolumeB = deckB ? deckB.volume : 0;
-        let fadeOut = setInterval(() => {
-            if (deckA && deckA.volume > 0) {
-                deckA.volume = Math.max(0, deckA.volume - 0.05);
-            }
-            if (deckB && deckB.volume < startVolumeB) {
-                deckB.volume = Math.min(startVolumeB, deckB.volume + 0.05);
-            }
-            if (deckA && deckA.volume <= 0) {
-                clearInterval(fadeOut);
-                deckA.pause();
-            }
-        }, fadeTime / 20);
+      if (isFading) return;
+      
+      if (!deckB || !deckB.src || deckB.src === "" || currentIndex + 1 >= playlistFiles.length) {
+        alert("No next track available to fade to!");
+        return;
+      }
+      
+      isFading = true;
+      
+      fadeButton.style.background = "#6e6e73";
+      fadeButton.style.cursor = "not-allowed";
+      fadeButton.textContent = "Fading...";
+      fadeButton.disabled = true;
+      
+      const fadeTime = 3000;
+      const steps = 60;
+      const interval = fadeTime / steps;
+      let step = 0;
+      
+      deckA.volume = 1.0;
+      deckB.volume = 0.0;
+      
+      if (deckB.paused) {
+        deckB.play();
+      }
+      
+      const fadeInterval = setInterval(() => {
+        step++;
+        const progress = step / steps;
+        
+        deckA.volume = Math.max(0, 1 - progress);
+        deckB.volume = Math.min(1, progress);
+        
+        if (step >= steps) {
+          clearInterval(fadeInterval);
+          
+          deckA.volume = 0.0;
+          
+          const tempSrc = deckB.src;
+          const tempType = deckB.dataset.fileType;
+          const tempName = deckB.dataset.fileName;
+          
+          deckA.src = tempSrc;
+          deckA.dataset.fileType = tempType;
+          deckA.dataset.fileName = tempName;
+          deckA.volume = 1.0;
+          deckA.currentTime = deckB.currentTime;
+          deckA.play();
+          
+          currentIndex++;
+          highlightRow(currentIndex);
+          
+          loadDeckB(currentIndex + 1);
+          if (currentIndex + 1 >= playlistFiles.length) {
+            console.log("Reached end of playlist");
+            fadeButton.style.opacity = "0.5";
+            fadeButton.title = "No more tracks in queue";
+          }
+          
+          deckB.volume = 0.0;
+          deckB.pause();
+          deckB.currentTime = 0;
+          
+          isFading = false;
+          fadeButton.style.background = "linear-gradient(135deg, #FF9500, #FF6D00)";
+          fadeButton.style.cursor = "pointer";
+          fadeButton.textContent = "Crossfade";
+          fadeButton.disabled = false;
+          
+          console.log(`Crossfade complete. Now playing: ${tempName}`);
+        }
+      }, interval);
     });
   }
-  
-  const playlist = document.getElementById('playlist');
 
+  // Playlist Drop Zone
   if (playlist) {
     playlist.addEventListener('dragover', e => {
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-      playlist.classList.add('drag-over');  // optional visual feedback
+      e.dataTransfer.dropEffect = 'move';
+      playlist.classList.add('drag-over');
     });
-    
+
     playlist.addEventListener('dragleave', e => {
       e.preventDefault();
       playlist.classList.remove('drag-over');
     });
-    
+
     playlist.addEventListener('drop', e => {
       e.preventDefault();
       playlist.classList.remove('drag-over');
-    
+
       const raw = e.dataTransfer.getData('application/json');
       if (!raw) return;
       const fileData = JSON.parse(raw);
       
-      // Check if this is a reorder operation (dragging within playlist)
       const draggedFromPlaylist = e.dataTransfer.getData('text/plain') === 'playlist-reorder';
       
       if (draggedFromPlaylist) {
-        // This is handled by the row-level drop event, do nothing here
         return;
       }
 
-      // This is a new item being added from media library
       addToPlaylist(fileData);
       playlistFiles.push(fileData);
 
@@ -1563,273 +2214,73 @@ document.addEventListener("DOMContentLoaded", async () => {
       loadDeckB(currentIndex + 1);
     });
   }
-  
-  function playMedia(url, type) {
-      if (type === "audio") {
-          if (deckA) {
-            deckA.src = url;
-            deckA.play();
-          }
-      } else if (type === "video") {
-          if (liveMonitor) {
-            liveMonitor.src = url;
-            liveMonitor.play();
-          }
-      }
-  }
-  
-  function processPlaylist() {
-    const playlistTable = document.getElementById("playlist-items");
-    if (playlistTable) {
-      const rows = Array.from(playlistTable.querySelectorAll('tr:not(.drop-placeholder)'));
-      if (deckA && !deckA.src && rows.length) {
-        const fileData = {
-          fileName: rows[0].dataset.fileName,
-          fileType: rows[0].dataset.fileType,
-          fileUrl: rows[0].dataset.fileUrl,
-          fileDuration: rows[0].dataset.fileDuration
-        };
-        deckA.src = fileData.fileUrl;
-        deckA.dataset.fileType = fileData.fileType;
-        
-        // Set audio properties
-        if (fileData.fileType === "audio") {
-          deckA.muted = false;
-        } else if (fileData.fileType === "video") {
-          deckA.muted = true;
-        }
-        
-        deckA.play();
-        highlightRow(0);
-      }
-    }
-  }
 
-  function loadDeckA(idx) {
-    if (idx < 0 || idx >= playlistFiles.length || !deckA) return;
-    const fd = playlistFiles[idx];
-    deckA.src = fd.fileUrl;
-    deckA.dataset.fileType = fd.fileType;
-    deckA.dataset.fileName = fd.fileName;
-    
-    // Set audio properties
-    if (fd.fileType === "audio") {
-      deckA.muted = false;
-    } else if (fd.fileType === "video") {
-      deckA.muted = true;
-    }
-    
-    deckA.play();
-    highlightRow(idx);
-  }
-  
-  function loadDeckB(idx) {
-    if (idx < 0 || idx >= playlistFiles.length || !deckB) {
-      if (deckB) {
-        deckB.removeAttribute('src');
-      }
-      return;
-    }
-    const fd = playlistFiles[idx];
-    deckB.src               = fd.fileUrl;
-    deckB.dataset.fileType  = fd.fileType;
-    deckB.dataset.fileName  = fd.fileName;
-  }  
+  // Enhanced Playlist Click Handler with perfect sync
+  // Enhanced Playlist Click Handler - SIMPLIFIED
+const playlistItemsTable = document.getElementById("playlist-items");
+if (playlistItemsTable) {
+  playlistItemsTable.addEventListener("click", function(event) {
+    const row = event.target.closest("tr");
+    if (!row) return;
 
-function dragItem(event) {
-  const row = event.currentTarget;
-  event.dataTransfer.effectAllowed = 'move';
-  
-  const payload = {
-    fileName:     row.dataset.fileName,
-    fileType:     row.dataset.fileType,
-    fileUrl:      row.dataset.fileUrl,
-    filePath:     row.dataset.filePath,
-    fileDuration: row.dataset.fileDuration
-  };
-  
-  event.dataTransfer.setData('application/json', JSON.stringify(payload));
-  
-  // Check if dragging from playlist
-  const playlistTable = document.getElementById('playlist-items');
-  if (playlistTable && playlistTable.contains(row)) {
-    event.dataTransfer.setData('text/plain', 'playlist-reorder');
-    row.classList.add('dragging');
-  }
-}
+    const fileType = row.dataset.fileType;
+    const fileUrl = row.dataset.fileUrl;
+    const fileName = row.dataset.fileName;
 
-function updateTotalTime() {
-  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
-  let totalSeconds = 0;
-  
-  rows.forEach(row => {
-    const duration = row.dataset.fileDuration;
-    totalSeconds += parseTimeToSeconds(duration);
-  });
-  
-  const totalTimeElement = document.getElementById('total-time');
-  if (totalTimeElement) {
-    totalTimeElement.textContent = formatTotalTime(totalSeconds);
-  }
-  
-  console.log(`Total playlist time: ${formatTotalTime(totalSeconds)}`);
-}
-
-  // ---- Helper: addToPlaylist (used when a file is dropped) ---- //
-  function addToPlaylist(fileData) {
-    const row = document.createElement("tr");
-    row.dataset.fileName     = fileData.fileName;
-    row.dataset.fileType     = fileData.fileType;
-    row.dataset.fileUrl      = fileData.fileUrl;
-    row.dataset.fileDuration = fileData.fileDuration;
-    row.setAttribute("draggable", true);
-    row.addEventListener("dragstart", dragItem);
-  
-    const titleCell  = document.createElement("td");
-    titleCell.textContent = fileData.fileName;
-    const typeCell   = document.createElement("td");
-    typeCell.textContent = fileData.fileType || "Audio";
-    const lengthCell = document.createElement("td");
-    lengthCell.textContent = fileData.fileDuration || "--:--";
-  
-    row.append(titleCell, typeCell, lengthCell);
-  
-    // Remove button cell
-    const removeCell   = document.createElement("td");
-    const removeButton = document.createElement("button");
-    removeButton.textContent = "Remove";
-    removeButton.addEventListener("click", () => {
-      row.remove();
-      updatePlaylistArray();
-      updateTotalTime();
-    });
-    removeCell.appendChild(removeButton);
-    row.appendChild(removeCell);
-  
-    // Clean up placeholder
-    const placeholder = document.querySelector(".drop-placeholder");
-    if (placeholder) placeholder.remove();
-  
-    const playlistItems = document.getElementById("playlist-items");
-    if (playlistItems) {
-      playlistItems.appendChild(row);
-      updateTotalTime();
-    }
-    console.log("Added to playlist:", fileData.fileName);
-  }
-
-  // Add drag and drop reordering to playlist rows
-function setupPlaylistRowDragDrop() {
-  const playlistTable = document.getElementById('playlist-items');
-  if (!playlistTable) return;
-  
-  playlistTable.addEventListener('dragover', e => {
-    e.preventDefault();
-    const dragging = document.querySelector('.dragging');
-    if (!dragging) return;
-    
-    const afterElement = getDragAfterElement(playlistTable, e.clientY);
-    
-    if (afterElement == null) {
-      playlistTable.appendChild(dragging);
-    } else {
-      playlistTable.insertBefore(dragging, afterElement);
-    }
-  });
-
-  document.addEventListener('dragover', e => {
-    if (e.target.closest('#playlist-items tr')) {
-      e.preventDefault();
-    }
-  });
-  
-  playlistTable.addEventListener('dragend', e => {
-    const dragging = document.querySelector('.dragging');
-    if (dragging) {
-      dragging.classList.remove('dragging');
-      updatePlaylistArray(); // Update the playlistFiles array to match new order
-    }
-  });
-}
-
-function getDragAfterElement(container, y) {
-  const draggableElements = [...container.querySelectorAll('tr:not(.dragging):not(.drop-placeholder)')];
-  
-  return draggableElements.reduce((closest, child) => {
-    const box = child.getBoundingClientRect();
-    const offset = y - box.top - box.height / 2;
-    
-    if (offset < 0 && offset > closest.offset) {
-      return { offset: offset, element: child };
-    } else {
-      return closest;
-    }
-  }, { offset: Number.NEGATIVE_INFINITY }).element;
-}
-
-function updatePlaylistArray() {
-  const rows = Array.from(document.querySelectorAll('#playlist-items tr:not(.drop-placeholder)'));
-  playlistFiles = rows.map(row => ({
-    fileName: row.dataset.fileName,
-    fileType: row.dataset.fileType,
-    fileUrl: row.dataset.fileUrl,
-    fileDuration: row.dataset.fileDuration
-  }));
-  
-  // Update deck B to load the correct next track
-  loadDeckB(currentIndex + 1);
-  updateTotalTime(); // Update total time when playlist is reordered
-  console.log('Playlist reordered:', playlistFiles);
-}
-
-  const playlistItemsTable = document.getElementById("playlist-items");
-  if (playlistItemsTable) {
-    playlistItemsTable.addEventListener("click", function(event) {
-      const row = event.target.closest("tr");
-      if (!row) return;
-
-      const fileType = row.dataset.fileType;
-      const fileUrl = row.dataset.fileUrl;
-
-      if (fileType === "video") {
-        confirmAndReplaceLiveMonitor(() => {
-          if (liveMonitor) {
-            liveMonitor.pause();
-            if (liveMonitor.srcObject) {
-              liveMonitor.srcObject.getTracks().forEach(t => t.stop());
-              liveMonitor.srcObject = null;
-            }
-
-            showFile(fileUrl);
-
-            if (deckA) {
-              deckA.src = fileUrl;
-              deckA.dataset.fileType = fileType;
-              deckA.dataset.fileName = row.dataset.fileName;
-              deckA.play();
-            }
-          }
-        });
-      } else if (fileType === "audio") {
-        // Handle audio files
+    if (fileType === "video") {
+      const liveMonitor = document.getElementById("liveMonitor");
+      if (liveMonitor) {
         if (deckA) {
           deckA.src = fileUrl;
           deckA.dataset.fileType = fileType;
-          deckA.dataset.fileName = row.dataset.fileName;
-          deckA.muted = false; // Ensure audio is not muted
+          deckA.dataset.fileName = fileName;
           deckA.play();
         }
         
-        // Highlight the playing row
-        document.querySelectorAll('#playlist-items tr').forEach(r => 
-          r.classList.remove('playing')
-        );
-        row.classList.add('playing');
+        showFile(fileUrl);
+        
+        // Simple stream switch for video
+        if (isCurrentlyStreaming) {
+          setTimeout(() => {
+            const videoStream = liveMonitor.captureStream(30);
+            switchStreamContent(videoStream, 'video');
+          }, 500);
+        }
       }
-    }); 
+    } else if (fileType === "audio") {
+      if (deckA) {
+        deckA.src = fileUrl;
+        deckA.dataset.fileType = fileType;
+        deckA.dataset.fileName = fileName;
+        deckA.muted = false;
+        deckA.play();
+        
+        // Simple stream switch for audio
+        if (isCurrentlyStreaming) {
+          setTimeout(() => {
+            const audioStream = setupAudioStreamCapture(deckA);
+            if (liveMonitor.combinedStream) {
+              switchStreamContent(liveMonitor.combinedStream, 'audio');
+            }
+          }, 800);
+        }
+      }
+    }
+  }); 
+}
+
+  // Wire up session buttons
+  const saveSessionBtn = document.getElementById('save-session');
+  const loadSessionBtn = document.getElementById('load-session');
+  
+  if (saveSessionBtn) {
+    saveSessionBtn.addEventListener('click', saveSession);
+  }
+  if (loadSessionBtn) {
+    loadSessionBtn.addEventListener('click', loadSession);
   }
 
-  // Add status handlers
+  // Status Handlers
   window.onStreamStatus = (status) => {
     updateLiveStatus(status);
   };
@@ -1839,19 +2290,37 @@ function updatePlaylistArray() {
     await handleStreamError('Stream error: ' + error);
   };
 
-  // ENHANCED HLS STATUS MONITORING WITH BETTER ERROR HANDLING
+  // Enhanced browser focus handling
+  let wasStreamingBeforeHidden = false;
+  
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      wasStreamingBeforeHidden = isCurrentlyStreaming;
+      console.log(`Page hidden, was streaming: ${wasStreamingBeforeHidden}`);
+    } else {
+      console.log(`Page visible, was streaming before: ${wasStreamingBeforeHidden}`);
+    }
+  });
+
+  // Fixed HLS Status Monitoring with reduced frequency and better error handling
   if (window.electronAPI && window.electronAPI.getHLSStatus) {
+    let hlsMonitoringActive = true;
+    let consecutiveErrors = 0;
+    
     const monitorHLSStatus = async () => {
+      if (!hlsMonitoringActive) return;
+      
       try {
         const status = await window.electronAPI.getHLSStatus();
+        consecutiveErrors = 0;
         
         if (status.error) {
           console.warn('HLS Status Error:', status.error);
           return;
         }
         
-        // Log status occasionally (every 5th check = ~2.5 minutes)
-        if (Math.random() < 0.2) {
+        // Only log status occasionally to reduce noise
+        if (Math.random() < 0.05) {
           console.log('HLS Status:', {
             streaming: status.isStreaming,
             segments: status.segmentCount,
@@ -1860,12 +2329,11 @@ function updatePlaylistArray() {
           });
         }
         
-        // Warn if too many segments are accumulating
+        // More conservative cleanup thresholds
         if (status.segmentCount > 50) {
           console.warn(`High segment count detected: ${status.segmentCount} segments`);
         }
         
-        // Emergency cleanup if segments are really piling up
         if (status.segmentCount > 100 && !isCurrentlyStreaming) {
           console.warn('Emergency cleanup triggered due to excessive segments');
           try {
@@ -1879,60 +2347,116 @@ function updatePlaylistArray() {
         }
         
       } catch (error) {
-        console.error('Error getting HLS status:', error);
+        consecutiveErrors++;
+        if (consecutiveErrors <= 3) {
+          console.error('Error getting HLS status:', error);
+        }
+        
+        // Disable monitoring after too many consecutive errors
+        if (consecutiveErrors > 10) {
+          console.warn('Disabling HLS monitoring due to repeated errors');
+          hlsMonitoringActive = false;
+        }
       }
     };
     
-    // Check HLS status every 30 seconds
+    // Reduced monitoring frequency from 20s to 30s
     setInterval(monitorHLSStatus, 30000);
-    
-    // Initial status check after a delay
     setTimeout(monitorHLSStatus, 5000);
   }
 
-  // ADDITIONAL CLEANUP ON PAGE UNLOAD
+  // Enhanced cleanup on page unload
   window.addEventListener('beforeunload', async (event) => {
     if (isCurrentlyStreaming) {
       console.log('Page unloading, stopping stream and cleaning HLS files...');
-      
-      // Stop MediaRecorder immediately
-      if (currentMediaRecorder && currentMediaRecorder.state !== "inactive") {
-        try {
-          currentMediaRecorder.stop();
-        } catch (error) {
-          console.error('Error stopping MediaRecorder on page unload:', error);
-        }
-      }
-      
-      // Close WebSocket immediately
-      if (currentWebSocket && currentWebSocket.readyState === WebSocket.OPEN) {
-        try {
-          currentWebSocket.close();
-        } catch (error) {
-          console.error('Error closing WebSocket on page unload:', error);
-        }
-      }
-      
-      // Stop HLS cleanup monitoring
-      if (window.electronAPI && window.electronAPI.stopHLSCleanup) {
-        try {
-          window.electronAPI.stopHLSCleanup();
-        } catch (error) {
-          console.error('Error stopping HLS cleanup on page unload:', error);
-        }
-      }
-
-      // Force cleanup HLS files on page unload
-      if (window.electronAPI && window.electronAPI.forceHLSCleanup) {
-        try {
-          window.electronAPI.forceHLSCleanup();
-          console.log('Forced HLS cleanup on page unload');
-        } catch (error) {
-          console.error('Error force cleaning HLS files on page unload:', error);
-        }
-      }
+      await stopCurrentStream();
     }
   });
 
-  console.log("Application initialized with HLS cleanup integration");
+  console.log("FIXED Campus Radio - Complete Version with Perfect Sync + Audio Scrubbing Ready!");
+  console.log("Features: Perfect Live Monitor ↔ Deck A sync, Fixed audio scrubbing, Stream switching, Stable restart");
+  console.log("Live Monitor Sync: ✅ Scrubbing ✅ Play/Pause ✅ Track Changes ✅ Position Sync");
+  console.log("Audio System: ✅ No more MediaElementSource errors ✅ Scrubbing works while streaming");
+
+  // Debug helpers for troubleshooting
+  window.hlsDebugHelpers = {
+    checkStatus: () => {
+      console.log('=== Campus Radio Debug Status ===');
+      console.log('Currently Streaming:', isCurrentlyStreaming);
+      console.log('Active Operation ID:', activeOperationId);
+      console.log('Stream Content Type:', streamingContentType);
+      console.log('MediaRecorder State:', currentMediaRecorder ? currentMediaRecorder.state : 'null');
+      console.log('WebSocket State:', currentWebSocket ? currentWebSocket.readyState : 'null');
+      console.log('Current Stream Tracks:', currentStream ? currentStream.getTracks().length : 0);
+      console.log('Isolated Stream Pool Size:', isolatedStreamPool.size);
+      console.log('Completed Operations:', Array.from(completedOperations));
+      console.log('Connected Audio Elements:', connectedAudioElements.size);
+      console.log('Audio Context State:', audioContext ? audioContext.state : 'null');
+      console.log('================================');
+    },
+    
+    cleanup: async () => {
+      console.log('=== Force Cleanup ===');
+      await stopCurrentStream();
+      isolatedStreamPool.clear();
+      completedOperations.clear();
+      activeOperationId = null;
+      console.log('Cleanup completed');
+    },
+    
+    // FIXED: Add audio system reset helper
+    resetAudio: () => {
+      console.log('=== Audio System Reset ===');
+      resetAudioSystem();
+      console.log('Audio system reset completed - try starting stream again');
+    },
+    
+    emergency: async () => {
+      console.log('=== Emergency Reset ===');
+      try {
+        if (currentMediaRecorder) {
+          currentMediaRecorder.stop();
+          currentMediaRecorder = null;
+        }
+        if (currentWebSocket) {
+          currentWebSocket.close();
+          currentWebSocket = null;
+        }
+        if (currentStream) {
+          currentStream.getTracks().forEach(track => track.stop());
+          currentStream = null;
+        }
+        isolatedStreamPool.forEach(stream => {
+          stream.getTracks().forEach(track => track.stop());
+        });
+        isolatedStreamPool.clear();
+        resetAudioSystem(); // FIXED: Include audio reset in emergency
+        isCurrentlyStreaming = false;
+        updateLiveStatus(false);
+        console.log('Emergency reset completed');
+      } catch (error) {
+        console.error('Error during emergency reset:', error);
+      }
+    },
+    
+    monitor: (seconds = 10) => {
+      console.log(`=== Monitoring for ${seconds} seconds ===`);
+      let count = 0;
+      const interval = setInterval(() => {
+        count++;
+        console.log(`[${count}s] Streaming: ${isCurrentlyStreaming}, Op: #${activeOperationId}, Pool: ${isolatedStreamPool.size}, Audio: ${audioContext ? audioContext.state : 'null'}`);
+        if (count >= seconds) {
+          clearInterval(interval);
+          console.log('=== Monitoring complete ===');
+        }
+      }, 1000);
+    }
+  };
+
+  console.log('HLS Debug helpers available:');
+  console.log('  - window.hlsDebugHelpers.checkStatus() - Check current status');
+  console.log('  - window.hlsDebugHelpers.cleanup() - Force cleanup');
+  console.log('  - window.hlsDebugHelpers.resetAudio() - Reset audio system (use if audio errors occur)');
+  console.log('  - window.hlsDebugHelpers.emergency() - Emergency cleanup');
+  console.log('  - window.hlsDebugHelpers.monitor(30) - Monitor for 30 seconds');
 });

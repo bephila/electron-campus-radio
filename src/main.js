@@ -1,5 +1,5 @@
-// src/main.js - Complete main.js with WORKING HLS cleanup
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+// src/main.js - Complete main.js with WORKING HLS cleanup + FIXED Window Management
+const { app, BrowserWindow, ipcMain, dialog, powerMonitor } = require('electron');
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -564,27 +564,104 @@ let mainWindow;
 const hlsCleanup = new RobustHLSCleanupManager();
 hlsCleanup.initialize().catch(console.error);
 
-// Function to create the main window
+// FIXED: Function to create the main window with proper minimizing support
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    icon: path.join(__dirname, '..', 'assets', 'icon.png'), // 🎨 Added icon
+    width: 1400,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    // FIXED: Enable all window controls including minimize
+    frame: true,
+    titleBarStyle: 'default', // Use default title bar
+    minimizable: true,        // CRITICAL: Allow minimizing
+    maximizable: true,        // Allow maximizing
+    resizable: true,          // Allow resizing
+    closable: true,           // Allow closing
+    fullscreenable: true,     // Allow fullscreen
+    // FIXED: Proper window icon
+    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    // FIXED: Enhanced window appearance
+    backgroundColor: '#1c1c1e', // Dark background
+    show: false, // Don't show until ready
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       enableRemoteModule: false,
       sandbox: true,
-      worldSafeExecuteJavaScript: true
+      worldSafeExecuteJavaScript: true,
+      // FIXED: Enhanced security and compatibility
+      allowRunningInsecureContent: false,
+      experimentalFeatures: false,
+      webSecurity: true
     }
   });
 
   // Load the index.html file
   mainWindow.loadFile(path.join(__dirname, '..', 'public', 'index.html'));
 
-  // Open DevTools
-  mainWindow.webContents.openDevTools();
+  // FIXED: Show window when ready to prevent flash
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    
+    // FIXED: Focus the window properly
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+  });
+
+  // FIXED: Enhanced window state management
+  mainWindow.on('minimize', () => {
+    console.log('Window minimized');
+    // You can add tray functionality here if needed
+  });
+
+  mainWindow.on('restore', () => {
+    console.log('Window restored');
+  });
+
+  mainWindow.on('maximize', () => {
+    console.log('Window maximized');
+  });
+
+  mainWindow.on('unmaximize', () => {
+    console.log('Window unmaximized');
+  });
+
+  // FIXED: Proper window close handling
+  mainWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      
+      // Ask user if they want to minimize to tray or actually quit
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'question',
+        buttons: ['Minimize to Tray', 'Quit Application'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Cheers Campus Radio',
+        message: 'What would you like to do?',
+        detail: 'You can minimize to keep the app running in the background, or quit completely.'
+      });
+
+      if (choice === 1) {
+        // User chose to quit
+        app.isQuitting = true;
+        app.quit();
+      } else {
+        // User chose to minimize
+        mainWindow.hide();
+        // You can implement system tray here if needed
+      }
+    }
+  });
+
+  // Open DevTools only in development
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools();
+  }
 
   // Log when the window is ready
   mainWindow.webContents.on('did-finish-load', () => {
@@ -602,28 +679,75 @@ function createWindow() {
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`Renderer Console [${level}]: ${message}`);
   });
+
+  // FIXED: Handle window focus/blur for better alt-tab behavior
+  mainWindow.on('focus', () => {
+    console.log('Window focused');
+  });
+
+  mainWindow.on('blur', () => {
+    console.log('Window blurred');
+  });
+
+  // FIXED: Handle window state changes
+  mainWindow.on('show', () => {
+    console.log('Window shown');
+  });
+
+  mainWindow.on('hide', () => {
+    console.log('Window hidden');
+  });
 }
 
-// This method will be called when Electron has finished initialization
-app.whenReady().then(createWindow);
+// FIXED: Enhanced app ready handler
+app.whenReady().then(() => {
+  createWindow();
+  
+  // FIXED: System sleep/wake handling (helps with minimizing issues)
+  powerMonitor.on('suspend', () => {
+    console.log('System is going to sleep');
+  });
 
-// Quit when all windows are closed, except on macOS where it's common to have the
-// app remain active until the user quits explicitly with Cmd + Q
+  powerMonitor.on('resume', () => {
+    console.log('System resumed from sleep');
+    
+    // Restore window if it was minimized
+    if (mainWindow && mainWindow.isMinimized()) {
+      setTimeout(() => {
+        mainWindow.restore();
+      }, 1000);
+    }
+  });
+  
+  // FIXED: macOS specific behavior
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    } else if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+});
+
+// FIXED: Enhanced quit behavior
 app.on('window-all-closed', () => {
+  // On macOS, keep app running even when all windows are closed
   if (process.platform !== 'darwin') {
+    app.isQuitting = true;
     app.quit();
   }
 });
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-});
-
-// Gracefully kill ffmpeg and cleanup on quit
-app.on('before-quit', () => {
+// FIXED: Enhanced before-quit handler
+app.on('before-quit', (event) => {
   console.log('App is quitting, performing cleanup...');
+  app.isQuitting = true;
+  
+  // Kill FFmpeg processes
   if (ffmpegProcess) {
     try {
       ffmpegProcess.kill('SIGKILL');
@@ -631,8 +755,51 @@ app.on('before-quit', () => {
       console.error('Error killing FFmpeg on quit:', error);
     }
   }
+  
   // Force cleanup HLS files on app quit
   hlsCleanup.emergencyCleanupSync();
+});
+
+// IPC Handlers for window management
+ipcMain.handle('minimize-window', () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('maximize-window', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+    return mainWindow.isMaximized();
+  }
+  return false;
+});
+
+ipcMain.handle('close-window', () => {
+  if (mainWindow) {
+    mainWindow.close();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('get-window-state', () => {
+  if (mainWindow) {
+    return {
+      isMinimized: mainWindow.isMinimized(),
+      isMaximized: mainWindow.isMaximized(),
+      isFullScreen: mainWindow.isFullScreen(),
+      isFocused: mainWindow.isFocused(),
+      isVisible: mainWindow.isVisible()
+    };
+  }
+  return null;
 });
 
 // Enhanced FFmpeg start with HLS support

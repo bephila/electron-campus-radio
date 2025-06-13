@@ -1,7 +1,11 @@
+
 :8080 {
 	root * ./public
 	file_server
-
+	
+	# Serve viewer.html as default page when visiting root
+	try_files {path} /viewer.html
+	
 	# HLS streaming headers
 	@hls path /hls/*
 	header @hls {
@@ -9,7 +13,7 @@
 		Access-Control-Allow-Origin "*"
 		Content-Type "application/vnd.apple.mpegurl"
 	}
-
+	
 	# HLS segment headers  
 	@ts path /hls/*.ts
 	header @ts {

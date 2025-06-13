@@ -2,64 +2,93 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Campus Radio Live Stream</title>
+    <title>Cheers Campus Radio - Live Stream</title>
     <style>
         body {
             margin: 0;
-            padding: 20px;
-            background: #121212;
-            color: white;
-            font-family: sans-serif;
+            padding: 0;
+            background: #000;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
         }
-        .container {
-            max-width: 1280px;
-            margin: 0 auto;
-            text-align: center;
+        
+        .stream-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
+        
         #player {
             width: 100%;
-            border-radius: 8px;
-            margin: 20px 0;
+            height: 100%;
+            object-fit: contain;
             background: #000;
+            display: block;
         }
-        .status {
-            padding: 10px;
-            margin-bottom: 10px;
+        
+        /* BRB Image - Show when no stream */
+        #brbImage {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            display: none;
+        }
+        
+        /* Minimal branding */
+        .branding {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(30, 58, 138, 0.9);
+            padding: 10px 15px;
+            border-radius: 8px;
+            color: #fbbf24;
+            font-weight: bold;
             font-size: 18px;
+            z-index: 100;
+            opacity: 1;
+            transition: opacity 0.3s ease;
         }
+        
+        .branding.fade-out {
+            opacity: 0;
+        }
+        
+        /* Status indicator */
+        .status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            z-index: 100;
+            font-size: 14px;
+            min-width: 120px;
+        }
+        
         .status.live {
             color: #4CAF50;
         }
+        
         .status.offline {
             color: #f44336;
         }
-        .status.loading {
+        
+        .status.waiting {
             color: #ff9800;
         }
-        .controls {
-            margin: 20px 0;
-        }
-        #playButton {
-            background: #ff5500;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        #playButton:hover {
-            background: #ff7700;
-        }
-        #playButton:disabled {
-            background: #666;
-            cursor: not-allowed;
-        }
-        #playButton.hidden {
-            display: none;
-        }
-
-        /* Hide all controls except volume and fullscreen */
+        
+        /* Hide default video controls except volume and fullscreen */
         #player::-webkit-media-controls-play-button,
         #player::-webkit-media-controls-pause-button,
         #player::-webkit-media-controls-start-playback-button,
@@ -69,156 +98,253 @@
         #player::-webkit-media-controls-seek-back-button,
         #player::-webkit-media-controls-seek-forward-button {
             display: none !important;
-            pointer-events: none !important;
         }
 
-        /* Force volume slider and fullscreen button to show */
+        /* Keep volume and fullscreen controls */
         #player::-webkit-media-controls-volume-slider,
         #player::-webkit-media-controls-fullscreen-button {
             display: block !important;
-            pointer-events: auto !important;
-        }
-
-        /* Allow clicks on the native controls container */
-        #player::-webkit-media-controls-enclosure,
-        #player::-webkit-media-controls-panel,
-        #player::-webkit-media-controls-overlay-enclosure {
-            pointer-events: auto !important;
         }
         
-        .retry-info {
-            font-size: 14px;
-            color: #888;
-            margin-top: 10px;
+        /* Mobile-specific optimizations */
+        @media (max-width: 768px) {
+            .branding {
+                top: 10px;
+                left: 10px;
+                padding: 8px 12px;
+                font-size: 16px;
+            }
+            
+            .status {
+                bottom: 10px;
+                left: 10px;
+                padding: 8px 12px;
+                font-size: 12px;
+                min-width: 100px;
+            }
+            
+            #player {
+                width: 100vw;
+                height: 100vh;
+                object-fit: cover; /* Better mobile viewing */
+            }
+            
+            #brbImage {
+                object-fit: cover; /* Better mobile viewing */
+            }
         }
         
-        .debug-info {
-            font-size: 12px;
-            color: #666;
-            margin-top: 10px;
-            text-align: left;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
+        /* iOS Safari specific fixes */
+        #player {
+            -webkit-playsinline: true;
+            webkit-playsinline: true;
+        }
+        
+        /* Loading overlay - hidden */
+        .loading-overlay {
+            display: none !important;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Campus Radio Live Stream</h1>
-        <div class="status offline">Checking stream status...</div>
+    <div class="stream-container">
+        <!-- Minimal branding -->
+        <div class="branding" id="branding">
+            🎵 Cheers Campus Radio
+        </div>
+        
+        <!-- BRB Image - shown when no stream -->
+        <img id="brbImage" alt="Be Right Back - Cheers Campus Radio">
+        
+        <!-- Status -->
+        <div class="status waiting" id="status">Standby</div>
+        
+        <!-- Video player -->
         <video 
             id="player" 
+            autoplay
+            playsinline
+            webkit-playsinline
             controls
-            playsinline 
-            muted
             disablePictureInPicture
             controlsList="nodownload noremoteplayback noplaybackrate"
+            crossorigin="anonymous"
         ></video>
-        <div class="controls">
-            <button id="playButton" disabled>Start Watching</button>
-        </div>
-        <div class="retry-info"></div>
-        <div class="debug-info" id="debugInfo"></div>
     </div>
+
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
+        // DOM Elements
         const video = document.getElementById("player");
-        const status = document.querySelector(".status");
-        const playButton = document.getElementById("playButton");
-        const retryInfo = document.querySelector(".retry-info");
-        const debugInfo = document.getElementById("debugInfo");
-        const hlsUrl = "http://192.168.100.24:8080/hls/stream.m3u8";
+        const branding = document.getElementById("branding");
+        const status = document.getElementById("status");
+        const brbImage = document.getElementById("brbImage");
         
+        // Variables
         let hls = null;
         let isInitializing = false;
         let retryCount = 0;
         let retryTimer = null;
-        let checkInterval = null;
         let healthCheckInterval = null;
         let segmentCount = 0;
         let lastSegmentTime = 0;
         let connectionStartTime = 0;
-        const MAX_RETRIES = 10;
-        const RETRY_DELAY = 3000; // 3 seconds
-        const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
-        const STALE_THRESHOLD = 60000; // 60 seconds
-
+        let isStreamActive = false;
+        const MAX_RETRIES = 20;
+        const RETRY_DELAY = 3000;
+        const HEALTH_CHECK_INTERVAL = 5000;
+        const STALE_THRESHOLD = 30000;
+        
+        // FIXED: Auto-detect server for network access
+        const currentHost = window.location.hostname;
+        const isLocalhost = currentHost === 'localhost' || currentHost === '127.0.0.1';
+        
+        // FIXED: Correct URL construction based on access method
+        let hlsUrl, brbImageUrl;
+        if (isLocalhost) {
+            // Localhost access needs /campus-radio/ prefix
+            hlsUrl = window.location.protocol + "//" + currentHost + "/campus-radio/public/hls/stream.m3u8";
+            brbImageUrl = window.location.protocol + "//" + currentHost + "/campus-radio/assets/brb.jpg";
+        } else {
+            // Network IP access - virtual host already points to campus-radio folder
+            hlsUrl = window.location.protocol + "//" + currentHost + "/public/hls/stream.m3u8";
+            brbImageUrl = window.location.protocol + "//" + currentHost + "/assets/brb.jpg";
+        }
+        
+        console.log('🎵 Connecting to:', hlsUrl);
+        console.log('📷 BRB Image:', brbImageUrl);
+        console.log('🌐 Host detected:', currentHost, isLocalhost ? '(localhost)' : '(network)');
+        
+        // Set BRB image source
+        brbImage.src = brbImageUrl;
+        brbImage.onerror = () => {
+            console.warn('BRB image not found, trying alternative paths...');
+            // Try alternative paths
+            const altPaths = [
+                window.location.protocol + "//" + currentHost + "/campus-radio/assets/BRB.jpg",
+                window.location.protocol + "//" + currentHost + "/campus-radio/assets/brb.png",
+                window.location.protocol + "//" + currentHost + "/campus-radio/assets/BRB.png"
+            ];
+            
+            let pathIndex = 0;
+            const tryNextPath = () => {
+                if (pathIndex < altPaths.length) {
+                    console.log('Trying BRB path:', altPaths[pathIndex]);
+                    brbImage.src = altPaths[pathIndex];
+                    brbImage.onerror = () => {
+                        pathIndex++;
+                        tryNextPath();
+                    };
+                } else {
+                    console.warn('No BRB image found in any location');
+                    // Create a simple text-based BRB
+                    createTextBRB();
+                }
+            };
+            tryNextPath();
+        };
+        
+        brbImage.onload = () => {
+            console.log('✅ BRB image loaded successfully');
+        };
+        
+        // Create text-based BRB if image not found
+        function createTextBRB() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1280;
+            canvas.height = 720;
+            const ctx = canvas.getContext('2d');
+            
+            // Background
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+            gradient.addColorStop(0, '#1a1a2e');
+            gradient.addColorStop(0.5, '#16213e');
+            gradient.addColorStop(1, '#0f3460');
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Main text
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 96px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎵 Cheers Campus Radio', canvas.width/2, canvas.height/2 - 50);
+            
+            // Sub text
+            ctx.fillStyle = '#ffb724';
+            ctx.font = '48px Arial';
+            ctx.fillText('Be Right Back', canvas.width/2, canvas.height/2 + 50);
+            
+            // Status
+            ctx.fillStyle = '#888';
+            ctx.font = '32px Arial';
+            ctx.fillText('We\'ll be back with more great content soon!', canvas.width/2, canvas.height/2 + 120);
+            
+            // Convert to blob and use as image source
+            canvas.toBlob((blob) => {
+                brbImage.src = URL.createObjectURL(blob);
+            });
+        }
+        
+        // Hide branding after 3 seconds
+        setTimeout(() => {
+            branding.classList.add('fade-out');
+        }, 3000);
+        
+        // FIXED: Enhanced mobile-friendly status messages
         function updateStatus(text, className = '') {
+            // Mobile-friendly status messages
+            if (text.includes('Network') && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+                if (text.includes('offline')) {
+                    text = "Check WiFi connection";
+                } else if (text.includes('restored')) {
+                    text = "WiFi reconnected";
+                }
+            }
+            
             status.textContent = text;
             status.className = 'status ' + className;
         }
-
-        function updateDebugInfo() {
-            if (!debugInfo) return;
-            
-            const info = [];
-            if (hls) {
-                info.push(`Segments loaded: ${segmentCount}`);
-                info.push(`Buffer: ${video.buffered.length > 0 ? (video.buffered.end(0) - video.currentTime).toFixed(1) + 's' : 'Empty'}`);
-                info.push(`Connection time: ${connectionStartTime ? ((Date.now() - connectionStartTime) / 1000).toFixed(0) + 's' : 'N/A'}`);
-                
-                if (lastSegmentTime > 0) {
-                    const timeSinceLastSegment = Date.now() - lastSegmentTime;
-                    info.push(`Last segment: ${(timeSinceLastSegment / 1000).toFixed(0)}s ago`);
-                }
-            }
-            debugInfo.textContent = info.join(' | ');
+        
+        function showBRB() {
+            console.log('📷 Showing BRB image - no active stream');
+            video.style.display = 'none';
+            brbImage.style.display = 'block';
+            updateStatus("Standby", "waiting");
+            isStreamActive = false;
         }
-
+        
+        function hideBRB() {
+            console.log('🎵 Hiding BRB image - stream active');
+            brbImage.style.display = 'none';
+            video.style.display = 'block';
+            isStreamActive = true;
+        }
+        
         function cleanupHLS() {
-            console.log("Cleaning up HLS resources...");
-            
             if (hls) {
-                // Remove all event listeners before destroying
-                hls.off(Hls.Events.MANIFEST_PARSED);
-                hls.off(Hls.Events.ERROR);
-                hls.off(Hls.Events.FRAG_LOADED);
-                hls.off(Hls.Events.FRAG_PARSING_DATA);
                 hls.destroy();
                 hls = null;
             }
-            
             if (retryTimer) {
                 clearTimeout(retryTimer);
                 retryTimer = null;
             }
-            
-            if (checkInterval) {
-                clearInterval(checkInterval);
-                checkInterval = null;
-            }
-            
             if (healthCheckInterval) {
                 clearInterval(healthCheckInterval);
                 healthCheckInterval = null;
             }
-            
-            // Clear video source and reset
             video.src = '';
-            video.removeAttribute('src');
-            
-            // Reset counters
             segmentCount = 0;
             lastSegmentTime = 0;
             connectionStartTime = 0;
-            
-            // Force garbage collection if available
-            if (window.gc) {
-                try {
-                    window.gc();
-                } catch (e) {
-                    console.log("Garbage collection not available");
-                }
-            }
-            
-            updateDebugInfo();
         }
-
+        
+        // FIXED: Better stream detection
         async function checkStreamAvailability() {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
                 
                 const response = await fetch(hlsUrl, { 
                     method: 'HEAD',
@@ -232,13 +358,56 @@
                 });
                 
                 clearTimeout(timeoutId);
-                return response.ok;
+                
+                if (!response.ok) {
+                    return false;
+                }
+                
+                // Additional check: try to fetch the playlist content
+                const contentResponse = await fetch(hlsUrl, { 
+                    method: 'GET',
+                    cache: 'no-cache',
+                    signal: controller.signal
+                });
+                
+                if (contentResponse.ok) {
+                    const content = await contentResponse.text();
+                    // Check if playlist has actual segments
+                    const hasSegments = content.includes('.ts') || content.includes('EXTINF');
+                    console.log('Stream availability check:', hasSegments ? 'Active stream detected' : 'Empty playlist');
+                    return hasSegments;
+                }
+                
+                return false;
             } catch (error) {
-                console.log("Stream availability check failed:", error.message);
+                console.log('Stream check failed (normal if no stream):', error.message);
                 return false;
             }
         }
-
+        
+        // FIXED: Better stream server status check for network access
+        async function checkStreamServerStatus() {
+            try {
+                // Use detected host instead of hardcoded localhost
+                const statusUrl = window.location.protocol + "//" + currentHost + ":9998/stream/status";
+                const response = await fetch(statusUrl, {
+                    method: 'GET',
+                    cache: 'no-cache'
+                });
+                
+                if (!response.ok) {
+                    return { active: false, connected: false };
+                }
+                
+                const status = await response.json();
+                console.log('Stream server status:', status);
+                return status;
+            } catch (error) {
+                console.log('Stream server check failed (normal if server not running)');
+                return { active: false, connected: false };
+            }
+        }
+        
         function performHealthCheck() {
             if (!hls || !video) return;
             
@@ -248,101 +417,112 @@
             // Check if stream has gone stale
             if (lastSegmentTime > 0 && timeSinceLastSegment > STALE_THRESHOLD) {
                 console.warn(`Stream appears stale (${timeSinceLastSegment}ms since last segment)`);
-                updateStatus("Stream connection lost - reconnecting...", "loading");
+                updateStatus("Stream reconnecting...", "waiting");
+                showBRB();
                 initializeStream();
                 return;
             }
-            
-            // Check buffer health
-            if (video.buffered.length > 0) {
-                const bufferEnd = video.buffered.end(video.buffered.length - 1);
-                const bufferAmount = bufferEnd - video.currentTime;
-                
-                if (bufferAmount < 1) {
-                    console.warn("Low buffer detected, stream may be lagging");
+        }
+        
+        async function forcePlayWithAudio() {
+            try {
+                // Try unmuted first
+                video.muted = false;
+                await video.play();
+                console.log("✅ Auto-playing with audio");
+                updateStatus("Live", "live");
+                hideBRB();
+                return true;
+            } catch (error) {
+                try {
+                    // Fallback to muted
+                    video.muted = true;
+                    await video.play();
+                    console.log("⚠️ Auto-playing muted (browser restriction)");
+                    updateStatus("Live", "live");
+                    hideBRB();
+                    
+                    // Try to unmute after a short delay
+                    setTimeout(() => {
+                        video.muted = false;
+                        updateStatus("Live", "live");
+                    }, 1000);
+                    
+                    return true;
+                } catch (mutedError) {
+                    console.error("❌ All playback attempts failed:", mutedError);
+                    updateStatus("Click to play", "live");
+                    return false;
                 }
             }
-            
-            updateDebugInfo();
         }
-
+        
         async function initializeStream() {
             if (isInitializing) return;
             isInitializing = true;
-
-            console.log("Initializing stream...");
-
-            // Clean up any existing HLS instance
-            cleanupHLS();
-
-            // Check if stream is available
-            const isAvailable = await checkStreamAvailability();
             
-            if (!isAvailable) {
+            cleanupHLS();
+            
+            // FIXED: Check both stream availability and server status
+            const isAvailable = await checkStreamAvailability();
+            const serverStatus = await checkStreamServerStatus();
+            
+            if (!isAvailable || !serverStatus.active) {
                 isInitializing = false;
-                updateStatus("Stream offline - waiting for broadcast", "offline");
-                playButton.disabled = true;
-                retryInfo.textContent = `Checking again in ${RETRY_DELAY / 1000} seconds...`;
                 
-                // Retry after delay
-                retryTimer = setTimeout(() => {
-                    retryCount++;
-                    if (retryCount <= MAX_RETRIES) {
+                // Show BRB image when no stream is available
+                showBRB();
+                
+                if (retryCount < MAX_RETRIES) {
+                    retryTimer = setTimeout(() => {
+                        retryCount++;
                         initializeStream();
-                    } else {
-                        updateStatus("Stream unavailable after multiple attempts", "offline");
-                        retryInfo.textContent = "Stopped trying. Refresh page to try again.";
-                    }
-                }, RETRY_DELAY);
+                    }, RETRY_DELAY);
+                } else {
+                    // Reset retry count after max attempts
+                    setTimeout(() => {
+                        retryCount = 0;
+                        initializeStream();
+                    }, 10000);
+                }
                 return;
             }
-
+            
+            // Stream is available, hide BRB and start HLS
+            console.log('🎵 Stream detected, starting HLS player...');
+            
             if (Hls.isSupported()) {
                 hls = new Hls({
                     debug: false,
-                    enableWorker: true,
                     lowLatencyMode: true,
-                    backBufferLength: 0, // Don't keep old segments
-                    maxBufferLength: 10,
-                    maxMaxBufferLength: 20,
-                    maxBufferSize: 30 * 1000 * 1000, // 30MB
-                    maxBufferHole: 0.5,
-                    manifestLoadingTimeOut: 10000,
-                    manifestLoadingMaxRetry: 2,
-                    manifestLoadingRetryDelay: 1000,
-                    levelLoadingTimeOut: 10000,
-                    levelLoadingMaxRetry: 2,
-                    fragLoadingTimeOut: 20000,
-                    fragLoadingMaxRetry: 2,
+                    backBufferLength: 0,
+                    maxBufferLength: 6,
+                    maxMaxBufferLength: 12,
+                    maxBufferSize: 15 * 1000 * 1000,
+                    manifestLoadingTimeOut: 6000,
+                    manifestLoadingMaxRetry: 5,
+                    manifestLoadingRetryDelay: 500,
+                    levelLoadingTimeOut: 6000,
+                    levelLoadingMaxRetry: 5,
+                    fragLoadingTimeOut: 10000,
+                    fragLoadingMaxRetry: 5,
                     startFragPrefetch: true,
-                    testBandwidth: true,
                     progressive: true,
-                    liveSyncDurationCount: 2,
-                    liveMaxLatencyDurationCount: 6,
+                    liveSyncDurationCount: 1,
+                    liveMaxLatencyDurationCount: 3,
                     liveDurationInfinity: true,
-                    highBufferWatchdogPeriod: 1,
-                    // Enhanced cleanup settings
                     capLevelToPlayerSize: true,
-                    maxLoadingDelay: 4,
-                    defaultAudioCodec: undefined,
-                    initialLiveManifestSize: 1,
-                    maxBufferLength: 8, // Reduced for better cleanup
-                    maxMaxBufferLength: 16
+                    maxLoadingDelay: 4
                 });
-
-                // Add timestamp to prevent caching
-                const timestampedUrl = hlsUrl + '?t=' + Date.now() + '&viewer=true';
+                
+                const timestampedUrl = hlsUrl + '?t=' + Date.now();
                 hls.loadSource(timestampedUrl);
                 hls.attachMedia(video);
                 connectionStartTime = Date.now();
                 
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    console.log("HLS manifest parsed successfully");
+                hls.on(Hls.Events.MANIFEST_PARSED, async () => {
                     isInitializing = false;
                     retryCount = 0;
-                    updateStatus("Stream online - click to play", "live");
-                    playButton.disabled = false;
-                    retryInfo.textContent = '';
                     
                     // Start health monitoring
                     if (healthCheckInterval) {
@@ -350,143 +530,110 @@
                     }
                     healthCheckInterval = setInterval(performHealthCheck, HEALTH_CHECK_INTERVAL);
                     
-                    // Try autoplay muted
-                    video.muted = true;
-                    video.play()
-                        .then(() => {
-                            updateStatus("Stream playing (muted)", "live");
-                            playButton.textContent = "Unmute";
-                        })
-                        .catch(() => {
-                            updateStatus("Stream ready - click to play", "live");
-                        });
+                    // Auto-start playback immediately
+                    await forcePlayWithAudio();
                 });
-
+                
                 hls.on(Hls.Events.ERROR, (event, data) => {
-                    console.error('HLS Error:', data);
+                    console.error('HLS Error:', data.type, data.details);
                     
                     if (data.fatal) {
                         isInitializing = false;
+                        showBRB();
                         
                         switch (data.type) {
                             case Hls.ErrorTypes.NETWORK_ERROR:
-                                updateStatus("Network error - retrying...", "loading");
-                                retryInfo.textContent = "Network connection issues detected";
+                                updateStatus("Network error", "waiting");
                                 setTimeout(() => initializeStream(), 2000);
                                 break;
                             case Hls.ErrorTypes.MEDIA_ERROR:
-                                updateStatus("Media error - recovering...", "loading");
-                                retryInfo.textContent = "Attempting media recovery";
+                                updateStatus("Media error", "waiting");
                                 try {
                                     hls.recoverMediaError();
                                 } catch (e) {
-                                    console.error("Media recovery failed:", e);
-                                    setTimeout(() => initializeStream(), 3000);
+                                    setTimeout(() => initializeStream(), 2000);
                                 }
                                 break;
                             default:
-                                updateStatus("Stream error - retrying...", "offline");
-                                retryInfo.textContent = "Stream connection error";
-                                setTimeout(() => initializeStream(), 3000);
+                                updateStatus("Stream error", "waiting");
+                                setTimeout(() => initializeStream(), 2000);
                                 break;
                         }
-                    } else {
-                        // Non-fatal error, just log it
-                        console.warn('Non-fatal HLS error:', data);
                     }
                 });
-
-                // Monitor segment loading for health
-                hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
+                
+                hls.on(Hls.Events.FRAG_LOADED, () => {
                     segmentCount++;
                     lastSegmentTime = Date.now();
-                    
-                    // Stream is healthy, reset retry count
                     if (retryCount > 0) {
                         retryCount = 0;
-                        retryInfo.textContent = '';
                     }
                     
-                    updateDebugInfo();
+                    // Ensure BRB is hidden when segments are loading
+                    if (!isStreamActive) {
+                        hideBRB();
+                    }
                 });
-
-                // Monitor fragment parsing for additional health info
-                hls.on(Hls.Events.FRAG_PARSING_DATA, (event, data) => {
-                    // Additional health monitoring can be added here
-                });
-
-                // Monitor buffer events for cleanup optimization
-                hls.on(Hls.Events.BUFFER_FLUSHED, () => {
-                    console.log("HLS buffer flushed - segments cleaned");
-                });
-
+                
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Safari native HLS support
-                console.log("Using Safari native HLS support");
-                video.src = hlsUrl + '?t=' + Date.now() + '&viewer=safari';
+                // Safari native HLS
+                video.src = hlsUrl + '?t=' + Date.now();
                 connectionStartTime = Date.now();
                 
-                video.addEventListener('loadedmetadata', () => {
+                video.addEventListener('loadedmetadata', async () => {
                     isInitializing = false;
-                    updateStatus("Stream ready - click to play", "live");
-                    playButton.disabled = false;
-                    retryInfo.textContent = '';
                     
-                    // Start health monitoring for Safari
+                    // Start health monitoring
                     if (healthCheckInterval) {
                         clearInterval(healthCheckInterval);
                     }
                     healthCheckInterval = setInterval(performHealthCheck, HEALTH_CHECK_INTERVAL);
+                    
+                    await forcePlayWithAudio();
                 });
                 
-                video.addEventListener('error', (e) => {
-                    console.error("Safari HLS error:", e);
+                video.addEventListener('error', () => {
                     isInitializing = false;
-                    updateStatus("Stream not available", "offline");
-                    retryInfo.textContent = "Stream connection failed";
-                    setTimeout(() => initializeStream(), 3000);
+                    updateStatus("Stream error", "waiting");
+                    showBRB();
+                    setTimeout(() => initializeStream(), 2000);
                 });
-            } else {
-                isInitializing = false;
-                updateStatus("HLS not supported in this browser", "offline");
-                retryInfo.textContent = "Please use a modern browser with HLS support";
             }
         }
-
-        // Handle play button click
-        playButton.addEventListener('click', () => {
-            if (video.muted) {
-                video.muted = false;
-                updateStatus("Stream playing", "live");
-                playButton.style.display = 'none';
-                return;
-            }
-
-            video.play()
-                .then(() => {
-                    updateStatus("Stream playing", "live");
-                    playButton.style.display = 'none';
-                })
-                .catch(error => {
-                    console.error('Playback failed:', error);
-                    // If play fails, try muted
-                    video.muted = true;
-                    video.play()
-                        .then(() => {
-                            updateStatus("Stream playing (muted)", "live");
-                            playButton.textContent = "Unmute";
-                        })
-                        .catch(() => {
-                            updateStatus("Playback failed. Click to try again.", "offline");
-                        });
-                });
+        
+        // Video event listeners
+        video.addEventListener('playing', () => {
+            updateStatus("Live", "live");
+            hideBRB();
         });
-
-        // Enhanced visibility change handling
+        
+        video.addEventListener('waiting', () => {
+            updateStatus("Buffering...", "waiting");
+        });
+        
+        video.addEventListener('stalled', () => {
+            updateStatus("Stream buffering...", "waiting");
+        });
+        
+        video.addEventListener('pause', () => {
+            if (isStreamActive) {
+                updateStatus("Paused", "waiting");
+            }
+        });
+        
+        video.addEventListener('error', (e) => {
+            console.error("Video element error:", e);
+            if (!isInitializing) {
+                updateStatus("Video error", "offline");
+                showBRB();
+                setTimeout(() => initializeStream(), 2000);
+            }
+        });
+        
+        // Handle visibility change
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 console.log("Page hidden - pausing health checks");
-                // Page is hidden, pause checking but keep connection
                 if (retryTimer) {
                     clearTimeout(retryTimer);
                 }
@@ -495,22 +642,20 @@
                     healthCheckInterval = null;
                 }
             } else {
-                console.log("Page visible - resuming health checks");
-                // Page is visible again, resume checking if needed
+                console.log("Page visible - resuming");
                 if (!hls && !isInitializing) {
                     initializeStream();
                 } else if (hls && !healthCheckInterval) {
-                    // Resume health checking
                     healthCheckInterval = setInterval(performHealthCheck, HEALTH_CHECK_INTERVAL);
                 }
             }
         });
-
-        // Handle network state changes
+        
+        // Network state handlers
         window.addEventListener('online', () => {
             console.log("Network back online");
             if (!hls && !isInitializing) {
-                updateStatus("Network restored - reconnecting...", "loading");
+                updateStatus("Network restored", "waiting");
                 initializeStream();
             }
         });
@@ -518,76 +663,77 @@
         window.addEventListener('offline', () => {
             console.log("Network went offline");
             updateStatus("Network offline", "offline");
+            showBRB();
             cleanupHLS();
         });
-
-        // Disable right-click on video
+        
+        // Disable right-click
         video.addEventListener('contextmenu', e => e.preventDefault());
-
-        // Enhanced error handling for video element
-        video.addEventListener('error', (e) => {
-            console.error("Video element error:", e);
-            if (!isInitializing) {
-                updateStatus("Video playback error", "offline");
-                setTimeout(() => initializeStream(), 2000);
-            }
-        });
-
-        // Monitor video stalling
-        video.addEventListener('stalled', () => {
-            console.warn("Video stalled");
-            updateStatus("Stream buffering...", "loading");
-        });
-
-        video.addEventListener('waiting', () => {
-            console.log("Video waiting for data");
-            updateStatus("Loading...", "loading");
-        });
-
-        video.addEventListener('playing', () => {
-            console.log("Video playing");
-            if (video.muted) {
-                updateStatus("Stream playing (muted)", "live");
-            } else {
-                updateStatus("Stream playing", "live");
-            }
-        });
-
-        // Start streaming
-        console.log("Starting stream initialization");
-        initializeStream();
-
-        // Periodic availability check
-        checkInterval = setInterval(async () => {
+        brbImage.addEventListener('contextmenu', e => e.preventDefault());
+        
+        // Start with BRB image and begin checking for stream
+        showBRB();
+        
+        // Auto-detect if we're on mobile for better user experience
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        
+        // Start the stream check immediately, with faster retry on mobile
+        setTimeout(() => {
+            initializeStream();
+        }, isMobile ? 500 : 1000);
+        
+        // Continuous monitoring - check every 5 seconds for stream availability
+        setInterval(async () => {
             if (!hls && !isInitializing) {
-                // No active stream, check if one became available
-                console.log("Performing periodic stream check");
-                initializeStream();
+                const isAvailable = await checkStreamAvailability();
+                if (isAvailable && !isStreamActive) {
+                    console.log('🎵 Stream became available, starting player...');
+                    initializeStream();
+                }
             }
-        }, 10000); // Check every 10 seconds
-
-        // Enhanced cleanup on page unload
+        }, 5000);
+        
+        // Cleanup on page unload
         window.addEventListener('beforeunload', () => {
-            console.log("Page unloading - performing cleanup");
             cleanupHLS();
         });
-
-        // Handle page close/refresh
-        window.addEventListener('unload', () => {
-            cleanupHLS();
-        });
-
-        // Debug information toggle (for development)
-        let debugVisible = false;
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-                debugVisible = !debugVisible;
-                debugInfo.style.display = debugVisible ? 'block' : 'none';
-                console.log('Debug info toggled:', debugVisible);
+        
+        // FIXED: Network connectivity debugging
+        async function debugNetworkConnectivity() {
+            console.log('=== Network Connectivity Debug ===');
+            console.log('Current URL:', window.location.href);
+            console.log('Detected host:', currentHost);
+            console.log('HLS URL:', hlsUrl);
+            
+            // Test basic connectivity
+            try {
+                const testResponse = await fetch(window.location.protocol + "//" + currentHost + "/campus-radio/", {
+                    method: 'HEAD',
+                    cache: 'no-cache'
+                });
+                console.log('✅ Base server accessible:', testResponse.status);
+            } catch (error) {
+                console.error('❌ Base server not accessible:', error.message);
             }
-        });
-
-        console.log("Enhanced HLS viewer initialized");
+            
+            // Test stream server
+            try {
+                const streamResponse = await fetch(window.location.protocol + "//" + currentHost + ":9998/health", {
+                    method: 'GET',
+                    cache: 'no-cache'
+                });
+                console.log('✅ Stream server accessible:', streamResponse.status);
+            } catch (error) {
+                console.error('❌ Stream server not accessible:', error.message);
+            }
+            
+            console.log('=================================');
+        }
+        
+        // Run network debug on load
+        debugNetworkConnectivity();
+        
+        console.log("Enhanced HLS viewer initialized with BRB support and network connectivity");
     </script>
 </body>
 </html>
