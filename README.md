@@ -1,363 +1,250 @@
-# Campus Radio - Complete Setup Guide
+# Cheers Campus Radio - WAMP Server Deployment Guide
 
-A professional campus radio streaming application built with Electron, WAMP server, WebSocket→FFmpeg bridge, and HLS viewer. Stream live content (camera feeds, videos, and audio) to viewers through any web browser, both locally and over the network.
+A professional campus radio streaming application for WAMP server deployment with network access support.
 
-## 📋 Prerequisites Installation
+## 📋 Prerequisites
 
-### 1. Download and Install Required Software
+- **Windows 10/11**
+- **WAMP Server 3.0+** (Apache, PHP, MySQL)
+- **Node.js 14+** 
+- **Modern web browser** (Chrome/Firefox recommended)
 
-**FFmpeg Setup:**
-1. Download FFmpeg from: https://ffmpeg.org/download.html#build-windows
-2. Extract to: `C:\ffmpeg\`
-3. Your folder structure should be: `C:\ffmpeg\bin\ffmpeg.exe`
+## 🚀 Quick Setup Guide
 
-**Caddy Setup:**
-1. Download Caddy from: https://caddyserver.com/download
-2. Extract to: `C:\caddy\`
-3. Your folder structure should be: `C:\caddy\caddy.exe`
+### Step 1: Download Required Software
 
-**WAMP Server:**
-1. Download WAMP64 from: https://www.wampserver.com/
-2. Install with default settings
-3. Ensure it installs to: `C:\wamp64\`
+1. **Download FFmpeg:**
+   - Go to: https://ffmpeg.org/download.html
+   - Download Windows build (static)
+   - Extract to: `C:\ffmpeg\`
+   - Final structure: `C:\ffmpeg\bin\ffmpeg.exe`
 
-### 2. Add to Windows PATH Environment
+2. **Download Caddy:**
+   - Go to: https://caddyserver.com/download
+   - Download Windows x64
+   - Extract to: `C:\caddy\`
+   - Final structure: `C:\caddy\caddy.exe`
 
-1. **Open System Properties:**
+### Step 2: Add to Windows PATH
+
+1. **Open System Environment Variables:**
    - Press `Win + R` → type `sysdm.cpl` → Enter
    - Click "Environment Variables"
+   - Under "System Variables", select "Path" → "Edit"
 
-2. **Edit PATH Variable:**
-   - Under "System variables", find and select "Path"
-   - Click "Edit" → "New"
-   - Add these paths:
-     ```
-     C:\ffmpeg\bin
-     C:\caddy
-     ```
-   - Click "OK" to save
-
-3. **Verify Installation:**
-   - Open Command Prompt
-   - Test commands:
-     ```bash
-     ffmpeg -version
-     caddy version
-     ```
-
-## 🔧 WAMP Server Configuration
-
-### 1. Basic WAMP Setup
-
-1. **Start WAMP Server**
-2. **Check Apache Configuration:**
-   - Click WAMP icon → Apache → httpd.conf
-   - Find line `Listen 80`
-   - Change to: `Listen 0.0.0.0:80`
-
-3. **Enable Network Access:**
-   - Find this section:
-     ```apache
-     <Directory "C:/wamp64/www">
-         Options +Indexes +Includes +FollowSymLinks +MultiViews
-         AllowOverride All
-         Require local
-     </Directory>
-     ```
-   - Change `Require local` to: `Require all granted`
-
-### 2. Virtual Host Configuration
-
-1. **Click WAMP icon → Apache → httpd-vhosts.conf**
-2. **Add this configuration:**
-   ```apache
-   <VirtualHost *:80>
-       DocumentRoot "C:/wamp64/www/campus-radio/public"
-       ServerName campus-radio.local
-       ServerAlias *
-       DirectoryIndex viewer.html
-       <Directory "C:/wamp64/www/campus-radio/public">
-           Options Indexes FollowSymLinks
-           AllowOverride All
-           Require all granted
-       </Directory>
-   </VirtualHost>
+2. **Add these paths:**
+   ```
+   C:\ffmpeg\bin
+   C:\caddy
    ```
 
-3. **Restart WAMP Services**
+3. **Verify installation:**
+   - Open Command Prompt
+   - Test: `ffmpeg -version`
+   - Test: `caddy version`
 
-## 🔥 Windows Firewall Configuration
+### Step 3: Configure Windows Firewall
 
-### Method 1: Windows Firewall GUI
+**Option A: Quick Method**
+1. Press `Win + R` → type `firewall.cpl` → Enter
+2. Click "Allow an app through firewall"
+3. Click "Allow another app" → Browse to: `C:\wamp64\bin\apache\apache2.4.x\bin\httpd.exe`
+4. Check both **Private** and **Public** → OK
 
-1. **Press Win + R → type `firewall.cpl` → Enter**
-2. **Click "Allow an app or feature through Windows Defender Firewall"**
-3. **Click "Change Settings" → "Allow another app..."**
-4. **Add these applications:**
-   - `C:\wamp64\bin\apache\apache2.4.x\bin\httpd.exe`
-   - Check both "Private" and "Public"
+**Option B: Advanced Method (Recommended)**
+1. Press `Win + R` → type `wf.msc` → Enter
+2. Click "Inbound Rules" → "New Rule..."
+3. **Rule Type:** Port → Next
+4. **Protocol:** TCP → Specific Local Ports: `80,9999,9998` → Next
+5. **Action:** Allow the connection → Next
+6. **Profile:** Check all three boxes (Domain, Private, Public) → Next
+7. **Name:** Campus Radio Server → Finish
 
-### Method 2: Advanced Firewall Rules
+### Step 4: Configure WAMP for Network Access
 
-1. **Press Win + R → type `wf.msc` → Enter**
-2. **Create Inbound Rules for these ports:**
+**4.1 Update Apache Configuration:**
+1. Click WAMP icon → Apache → httpd.conf
+2. Find line (~60): `Listen 80`
+3. Add below it: `Listen 0.0.0.0:80`
+4. Find line (~200): `Require local`
+5. Change to: `Require all granted`
+6. Save file
 
-**HTTP Traffic (Port 80):**
-- Rule Type: Port
-- Protocol: TCP
-- Port: 80
-- Action: Allow
-- Profile: All
-- Name: "Campus Radio HTTP"
+**4.2 Configure Virtual Host:**
+1. Click 
+      A.WAMP icon → Apache → httpd.conf
+      B.WAMP icon → Apache → httpd-vhosts.conf
+2. Add this configuration:
 
-**Stream Server (Port 9999):**
-- Rule Type: Port
-- Protocol: TCP
-- Port: 9999
-- Action: Allow
-- Profile: All
-- Name: "Campus Radio Stream"
-
-**Health API (Port 9998):**
-- Rule Type: Port
-- Protocol: TCP
-- Port: 9998
-- Action: Allow
-- Profile: All
-- Name: "Campus Radio API"
-
-### Method 3: Command Line (Run as Administrator)
-```bash
-netsh advfirewall firewall add rule name="Campus Radio HTTP" dir=in action=allow protocol=TCP localport=80
-netsh advfirewall firewall add rule name="Campus Radio Stream" dir=in action=allow protocol=TCP localport=9999
-netsh advfirewall firewall add rule name="Campus Radio API" dir=in action=allow protocol=TCP localport=9998
+A.
+```apache
+<Directory "C:/wamp64/www">
+    Options +Indexes +Includes +FollowSymLinks +MultiViews
+    AllowOverride All
+    Require all granted
+</Directory>
+```
+B.
+```apache
+<VirtualHost *:80>
+    DocumentRoot "C:/wamp64/www/campus-radio/public"
+    ServerName campus-radio.local
+    ServerAlias *
+    DirectoryIndex viewer.html
+    <Directory "C:/wamp64/www/campus-radio/public">
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
 ```
 
-## 📁 Project Installation
+3. Save and restart WAMP services
 
-### 1. Clone/Download Project
-```bash
-# Place your campus-radio project in:
-C:\wamp64\www\campus-radio\
-```
+### Step 5: Deploy Campus Radio Files
 
-### 2. Install Dependencies
-```bash
-cd C:\wamp64\www\campus-radio
-npm install
-```
+1. **Extract project files to:**
+   ```
+   C:\wamp64\www\campus-radio\
+   ```
 
-### 3. Verify File Structure
-```
-C:\wamp64\www\campus-radio\
-├── public\
-│   ├── viewer.html
-│   ├── index.html
-│   ├── rendered.js
-│   └── hls\
-├── src\
-│   ├── stream-server.js
-│   ├── main.js
-│   └── config.js
-├── assets\
-│   └── brb.jpg
-└── package.json
-```
-
-## 🚀 Running the Application
-
-### 1. Start Services (Correct Order)
-
-1. **Start WAMP Server:**
-   - Ensure green light (all services running)
-
-2. **Start Stream Server:**
+2. **Install Node.js dependencies:**
    ```bash
    cd C:\wamp64\www\campus-radio
-   node src/stream-server.js
+   npm install
    ```
-   - Wait for: "✅ Server ready for connections!"
 
-3. **Start Electron App:**
+3. **Build the application:**
    ```bash
-   npm start
-   # OR run the built .exe file
+   npm run build:win
    ```
 
-### 2. Access Points
+### Step 6: Start Services
 
-**Local Access:**
-- Admin Panel: http://localhost/campus-radio/public/index.html
-- Live Viewer: http://localhost/campus-radio/public/viewer.html
+**6.1 Start WAMP Server:**
+- Ensure WAMP icon is green (all services running)
 
-**Network Access:** (Replace with your IP)
-- Admin Panel: http://YOUR-IP/public/index.html
-- Live Viewer: http://YOUR-IP/public/viewer.html
-- Example: http://192.168.1.100/public/viewer.html
+**6.2 Start Stream Server:**
+```bash
+cd C:\wamp64\www\campus-radio
+node src/stream-server.js
+```
 
-**Health Check:**
-- http://YOUR-IP:9998/health
+**6.3 Launch Application:**
+- Run: `dist\win-unpacked\Cheers.exe`
 
-## 🎯 How to Use
+## 🌐 Network Access URLs
 
-### For Broadcasters (Cheers App):
+Once configured, access from any device on your network:
 
-1. **Open the Cheers application**
-2. **Set up cameras:**
-   - Click settings button on camera preview
-   - Select camera and microphone
-   - Click "Go Live" to add to live monitor
+- **Live Viewer:** `http://YOUR-SERVER-IP/`
+- **Admin Panel:** `http://YOUR-SERVER-IP/public/index.html`
+- **Health Check:** `http://YOUR-SERVER-IP:9998/health`
 
-3. **Add media files:**
-   - Upload MP3/MP4 files
-   - Drag to playlist
-   - Click playlist items to play
-
-4. **Start streaming:**
-   - Click "Start Live Stream"
-   - Live indicator turns red
-   - Stream is now broadcasting
-
-### For Viewers (Web Browser):
-
-1. **Open viewer URL in any browser**
-2. **The page will automatically:**
-   - Show "Be Right Back" when no stream
-   - Play live stream when active
-   - Work on mobile devices
-
-## 🔍 Network Access Testing
-
-### Find Your IP Address:
+**Find your server IP:**
 ```bash
 ipconfig
-# Look for "IPv4 Address"
+```
+Look for "IPv4 Address" under your active network adapter.
+
+## 🔧 Development & Updates
+
+### When Code Changes:
+1. **Rebuild application:**
+   ```bash
+   cd C:\wamp64\www\campus-radio
+   npm run build:win
+   ```
+
+2. **The `dist` folder will be recreated** with updated application files
+
+3. **Restart services:**
+   - Stop stream server (Ctrl+C)
+   - Close Cheers application
+   - Start stream server: `node src/stream-server.js`
+   - Launch new build: `dist\win-unpacked\Cheers.exe`
+
+### File Structure:
+```
+C:\wamp64\www\campus-radio\
+├── dist\                    # Built application (recreated on build)
+│   └── win-unpacked\
+│       └── Cheers.exe       # Main application
+├── public\                  # Web interface
+│   ├── index.html          # Admin panel
+│   ├── viewer.html         # Live viewer
+│   ├── rendered.js         # Application logic
+│   └── hls\               # HLS streaming files
+├── src\                    # Source code
+│   ├── main.js            # Electron main process
+│   ├── stream-server.js   # WebSocket stream server
+│   └── preload.js         # Electron preload
+├── package.json           # Dependencies
+└── README.md             # This file
 ```
 
-### Test Network Connectivity:
-```bash
-# From broadcaster PC:
-ping YOUR-IP
+## 🎯 Usage Instructions
 
-# Test ports:
-telnet YOUR-IP 80
-telnet YOUR-IP 9999
-```
+### For Broadcasters:
+1. Launch `Cheers.exe`
+2. Upload audio/video files
+3. Create playlists
+4. Configure cameras (Settings buttons)
+5. Click "Start Live Stream"
 
-### Browser Testing:
-```javascript
-// Test in browser console:
-fetch('http://YOUR-IP:9998/health')
-  .then(r => r.json())
-  .then(data => console.log('✅ Server OK:', data))
-  .catch(e => console.error('❌ Server fail:', e))
-```
+### For Viewers:
+1. Open web browser
+2. Navigate to: `http://SERVER-IP/`
+3. Enjoy the live stream!
 
 ## 🛠️ Troubleshooting
 
-### Common Issues:
+### Stream Won't Start:
+- ✅ Check stream server is running: `node src/stream-server.js`
+- ✅ Verify firewall allows ports 80, 9999, 9998
+- ✅ Ensure WAMP Apache is running (green icon)
 
-**"Not Found" Error:**
-- Check virtual host configuration
-- Verify IP address in ServerAlias
-- Restart WAMP services
+### Network Access Issues:
+- ✅ Check `httpd-vhosts.conf` configuration
+- ✅ Verify `Require all granted` in Apache config
+- ✅ Test locally first: `http://localhost/`
+- ✅ Confirm devices are on same network
 
-**"Connection Refused":**
-- Check Windows Firewall settings
-- Verify stream server is running
-- Test port accessibility
+### Build Issues:
+- ✅ Close all Cheers applications before building
+- ✅ Run Command Prompt as Administrator
+- ✅ Clear dist folder: `rmdir /s dist`
+- ✅ Rebuild: `npm run build:win`
 
-**"Stream Won't Start":**
-- Ensure FFmpeg is in PATH
-- Check camera/microphone permissions
-- Verify WebSocket connection (port 9999)
-
-**Poor Video Quality:**
-- Increase bitrate in rendered.js
-- Check network bandwidth
-- Verify camera resolution settings
-
-### Log Files:
-- **WAMP Logs:** `C:\wamp64\logs\`
-- **Stream Server:** Console output
-- **Browser:** Developer Tools → Console
-
-### Reset Everything:
-```bash
-# Stop all services
-# Kill Node processes:
-taskkill /f /im node.exe
-
-# Restart WAMP
-# Restart in correct order
-```
-
-## 📱 Mobile Access
-
-**iOS/Safari:**
-- Works automatically
-- Tap to start video (autoplay restriction)
-
-**Android/Chrome:**
-- Works automatically
-- Better autoplay support
-
-**Network Requirements:**
-- Same WiFi network
-- Firewall ports open
-- Router allows device communication
-
-## 🔒 Security Notes
-
-**For Production Use:**
-- Change default ports
-- Add authentication
-- Use HTTPS/WSS
-- Restrict network access
-- Update firewall rules
-
-**For Development:**
-- Current setup allows network access
-- Suitable for local network only
-- Not internet-facing
+### Performance Issues:
+- ✅ Use Chrome/Firefox for best compatibility
+- ✅ Check network bandwidth (3+ Mbps recommended)
+- ✅ Reduce video bitrate in settings if needed
 
 ## 📞 Support
 
-**Check these first:**
-1. All services running (WAMP green light)
-2. Stream server shows "ready for connections"
-3. Firewall allows required ports
-4. Network devices on same subnet
+For technical issues:
+1. Check Windows Event Viewer for errors
+2. Review Apache error logs: `C:\wamp64\logs\apache_error.log`
+3. Check browser console for JavaScript errors
+4. Verify all prerequisites are installed correctly
 
-**Debug Commands:**
-```bash
-# Test FFmpeg
-ffmpeg -version
+## 🔒 Security Notes
 
-# Test Caddy  
-caddy version
+**⚠️ Important:** This configuration allows network access to your streaming server. For production use:
 
-# Test ports
-netstat -an | findstr :80
-netstat -an | findstr :9999
+- Configure proper firewall rules
+- Use HTTPS with SSL certificates
+- Implement user authentication
+- Regularly update WAMP and dependencies
 
-# Test network
-ping YOUR-IP
-```
+## 📝 Version Information
+
+- **Campus Radio:** 2.0.0
+- **Minimum WAMP:** 3.0+
+- **Node.js:** 14.0+
+- **Electron:** 35.0+
 
 ---
 
-## Quick Start Checklist
-
-- [ ] FFmpeg installed in `C:\ffmpeg\` and in PATH
-- [ ] Caddy installed in `C:\caddy\` and in PATH
-- [ ] WAMP64 installed and configured
-- [ ] Windows Firewall ports opened (80, 9999, 9998)
-- [ ] Virtual host configured
-- [ ] Project files in `C:\wamp64\www\campus-radio\`
-- [ ] Dependencies installed (`npm install`)
-- [ ] WAMP server running (green light)
-- [ ] Stream server started (`node src/stream-server.js`)
-- [ ] Network access tested
-
-**Happy Broadcasting! 🎵📻**
+🎵 **Happy Broadcasting with Cheers Campus Radio!** 🎵
